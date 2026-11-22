@@ -1,105 +1,107 @@
-# Spotify-list-to-songs
+# ListaCD
 
-Pega el enlace de una lista de Spotify y obtén **una carpeta con el nombre de la lista y todas sus canciones en MP3**, con etiquetas (título, artista, álbum, año) y carátula.
+**Pasa listas de Spotify a CDs para el coche, con la mejor calidad posible.**
 
-También funciona con enlaces de álbumes y de canciones sueltas.
+Pegas el enlace de una lista, eliges el tipo de CD y la app descarga las canciones, las prepara
+y graba los discos con tu grabadora. Si la lista no cabe en un CD, la reparte sola en varios.
 
-```
-Música/
-└── Mi lista de verano/
-    ├── Bad Bunny - Tití Me Preguntó.mp3
-    ├── Rosalía - Despechá.mp3
-    ├── …
-    └── Mi lista de verano.m3u8      ← la lista en su orden original
-```
+![Icono](assets/listacd.png)
 
-## Cómo funciona
+## Instalar (Windows)
 
-Spotify no permite descargar su audio (está cifrado con DRM), así que la app:
+1. Ve a la pestaña **Actions** del repositorio → la última ejecución verde de
+   *Compilar ListaCD para Windows* → descarga **ListaCD-Windows** (abajo, en *Artifacts*).
+   Si hay una versión publicada, también está en **Releases**.
+2. Descomprime y ejecuta **`ListaCD-Setup-x.y.z.exe`**. No necesita permisos de administrador.
+   (Hay también una versión portable en `.zip` que no se instala.)
+3. Windows puede avisar con «Windows protegió su PC» porque el programa no está firmado:
+   pulsa **Más información → Ejecutar de todas formas**.
 
-1. Lee de Spotify la lista de canciones (título, artistas, duración, álbum, ISRC, carátula).
-2. Busca cada canción en **YouTube Music**, priorizando la pista oficial del artista y
-   comparando título, artista y duración para no bajar versiones en directo, karaokes, remixes, etc.
-3. Descarga el mejor audio disponible con `yt-dlp` y lo convierte a **MP3 320 kbps** con `ffmpeg`.
-4. Escribe las etiquetas ID3 y la carátula con los datos de Spotify.
+Todo va incluido (ffmpeg, etc.); no hay que instalar nada más.
 
-### Sobre la "máxima calidad"
+## Cómo se usa
 
-La fuente es YouTube Music, que sirve el audio en Opus (~160 kbps) o AAC (128–256 kbps).
-Convertir a MP3 320 kbps es la opción de MP3 que **menos calidad pierde** en la recodificación,
-pero no puede añadir calidad que la fuente no tiene. Si quieres el audio exacto de la fuente
-sin ninguna pérdida extra, usa `--formato best` (guarda Opus/M4A en vez de MP3).
+1. En Spotify: **⋯** en la lista → **Compartir** → **Copiar enlace**.
+2. En ListaCD pulsa **Pegar** (o pega el enlace y pulsa *Cargar lista*).
+3. Elige el **tipo de CD**:
 
-## Instalación
+   | | **CD de audio** (recomendado) | **CD MP3** |
+   |---|---|---|
+   | Calidad | Máxima: calidad CD, sin pasar por MP3 | MP3 320 kbps |
+   | Canciones por disco | ~18–20 (80 min) | ~60–80 (700 MB) |
+   | ¿Funciona en mi coche? | En **cualquier** radio con CD | Solo si la radio lee MP3 |
+   | Títulos en la pantalla | Si la radio tiene CD-Text y grabas con ImgBurn | Sí (etiquetas ID3) |
 
-Necesitas **Python 3.10+** y **ffmpeg**.
+4. Pulsa **Descargar y preparar**. La app te dice cuántos CD-R vas a necesitar.
+5. Mete un **CD-R virgen** (mejor que CD-RW: muchas radios no leen los regrabables) y pulsa
+   **Grabar disco 1**. Al acabar, lo expulsa y te pide el siguiente.
 
-```bash
-# ffmpeg
-#   Windows: winget install ffmpeg
-#   macOS:   brew install ffmpeg
-#   Linux:   sudo apt install ffmpeg
+Los archivos quedan en `Música\ListaCD\<nombre de la lista>\CD Audio\Disco N\` (o `CD MP3`),
+por si quieres volver a grabarlos o copiarlos a un USB.
 
-git clone https://github.com/antonioxoficial23-sys/Spotify-list-to-songs.git
-cd Spotify-list-to-songs
-pip install -r requirements.txt
-```
+### Listas de más de 100 canciones
 
-### Claves de Spotify (recomendado)
+Sin configurar nada, Spotify solo deja leer **las primeras 100 canciones** de una lista. Para
+listas más largas, pon tus claves de Spotify (gratis, 2 minutos) en **⚙ Ajustes**:
 
-Sin claves, la app lee la página pública de Spotify, que **solo da las primeras 100 canciones**
-y no incluye el álbum de cada tema. Con claves (gratis) se lee la lista completa:
+1. Entra en <https://developer.spotify.com/dashboard> con tu cuenta y pulsa **Create app**.
+2. Nombre y descripción: lo que quieras. *Redirect URI*: `http://127.0.0.1:8888/callback`. Marca **Web API**.
+3. Copia el **Client ID** y el **Client secret** en Ajustes.
 
-1. Entra en <https://developer.spotify.com/dashboard> con tu cuenta de Spotify y pulsa **Create app**.
-2. Pon cualquier nombre, en *Redirect URI* pon `http://127.0.0.1:8888/callback` y marca *Web API*.
-3. Copia el **Client ID** y el **Client secret**.
-4. Copia `.env.example` como `.env` y pégalos ahí:
+Las listas que crea el propio Spotify (Descubrimiento semanal, Top Hits…) no se pueden leer con
+claves; la app usa la página pública (máx. 100). Truco: añade esas canciones a una lista tuya.
 
-```
-SPOTIFY_CLIENT_ID=tu_client_id
-SPOTIFY_CLIENT_SECRET=tu_client_secret
-```
+## Calidad: qué hace exactamente
 
-> Las listas creadas por el propio Spotify (p. ej. "Today's Top Hits", "Descubrimiento semanal")
-> ya no son accesibles por la API; en ese caso la app usa automáticamente la página pública (máx. 100).
-> Truco: copia esa lista a una lista tuya y descarga la tuya.
+Spotify cifra su audio, así que no se puede copiar directamente. ListaCD busca cada canción en
+**YouTube Music** y descarga la versión oficial del artista:
 
-## Uso
+- **Búsqueda precisa**: primero por código ISRC (identifica la grabación exacta); después por título,
+  artista y duración, descartando directos, karaokes, remixes, versiones aceleradas, etc.
+- **Sin pérdidas extra**: guarda el audio original (Opus ~160 kbps, o AAC 256 kbps si tienes
+  YouTube Premium y activas las cookies en Ajustes) y lo convierte **una sola vez** al formato final.
+  Para el CD de audio no pasa por MP3.
+- **Conversión de calidad de estudio**: remuestreo a 44,1 kHz con SoX (precisión de 28 bits)
+  y dither triangular al pasar a 16 bits.
+- **Igualar volumen** (activado por defecto): ajusta solo la ganancia de cada canción para que
+  no tengas que tocar el volumen entre una y otra. No comprime el sonido y nunca lo sube tanto
+  como para saturar (pico máximo de −1 dBTP).
+- **Pensado para el coche**: discos cerrados, MP3 en CBR con etiquetas ID3v2.3 + ID3v1 y carátula de
+  500 px (lo que mejor leen las radios), nombres numerados para que suenen en orden y
+  como mucho 99 pistas (CD audio) o 255 archivos (CD MP3) por disco.
 
-### Con ventana
+Es la mejor calidad que se puede obtener sin acceso al audio original de Spotify.
 
-```bash
-python -m spotify_to_mp3 --gui
-```
+## Si algo falla
 
-Pega el enlace, elige la carpeta y pulsa **Descargar**.
+- **«No se encontró en YouTube Music»**: la canción queda anotada en `canciones_no_encontradas.txt`.
+- **YouTube pide verificación o no descarga**: en Ajustes elige el navegador donde tienes sesión de
+  YouTube abierta (Firefox es el que mejor funciona) para usar sus cookies.
+- **Error al grabar**: prueba otra marca de CD-R (Verbatim suele ir muy bien). Para CD de audio,
+  también puedes grabar el archivo `Disco N.cue` con [ImgBurn](https://www.imgburn.com/) (gratis,
+  «Write image file to disc»), que además graba los títulos como CD-Text.
+- **Tras un tiempo deja de descargar**: YouTube cambia a menudo; instala la última versión de ListaCD.
 
-### Desde la terminal
-
-```bash
-python -m spotify_to_mp3 "https://open.spotify.com/playlist/XXXXXXXXXXXXXXXXXXXXXX"
-```
-
-| Opción | Qué hace |
-|---|---|
-| `-o CARPETA` | Dónde crear la carpeta de la lista (por defecto, la actual) |
-| `-b 320` / `-b V0` | Calidad del MP3: 320 kbps CBR (por defecto) o VBR V0 |
-| `-f best` | Guarda el audio original sin recodificar (Opus/M4A), sin pérdida extra |
-| `-n` | Numera los archivos según su posición en la lista |
-| `-j 4` | Canciones descargadas a la vez |
-
-Puedes pasar varios enlaces a la vez. Si vuelves a ejecutar la misma lista, **solo baja las canciones
-que falten** (útil para actualizar una lista o reintentar las que fallaron). Las que no se encuentran
-quedan anotadas en `_canciones_fallidas.txt` dentro de la carpeta.
-
-## Pruebas
+## Para desarrolladores
 
 ```bash
-pip install pytest
-python -m pytest
+pip install -r requirements.txt     # y ffmpeg en el PATH
+python ListaCD.py                   # interfaz gráfica
+python ListaCD.py <enlace> --modo mp3 -o ./salida   # terminal
+python -m pytest                    # pruebas
 ```
+
+- `listacd/spotify.py`: lectura de la lista (API oficial o página pública).
+- `listacd/matcher.py`: búsqueda y puntuación de coincidencias en YouTube Music.
+- `listacd/downloader.py`: descarga (yt-dlp), volumen, conversión (ffmpeg) y etiquetas.
+- `listacd/cd.py`: reparto en discos y hojas `.cue` con CD-Text.
+- `listacd/burner.py`: grabación con IMAPI2 de Windows.
+- `listacd/gui.py`: interfaz (CustomTkinter).
+
+El `.exe` y el instalador se generan en GitHub Actions (`.github/workflows/build-windows.yml`) con
+PyInstaller e Inno Setup; para publicar una versión, crea una etiqueta `vX.Y.Z`.
 
 ## Aviso legal
 
-Úsalo solo para uso personal con música a la que tengas derecho de acceso. Descargar contenido protegido
-puede infringir los términos de servicio de Spotify/YouTube y las leyes de propiedad intelectual de tu país.
+Solo para uso personal con música a la que tengas derecho de acceso. Descargar contenido protegido
+puede ir contra las condiciones de Spotify y YouTube y contra las leyes de tu país.

@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from spotify_to_mp3 import core, downloader, spotify
-from spotify_to_mp3.matcher import Match, score
-from spotify_to_mp3.spotify import Track
+from listacd import cd, core, downloader, spotify
+from listacd.config import Settings
+from listacd.matcher import Match, score
+from listacd.spotify import Track
 
 
 @pytest.mark.parametrize("url,kind,sid", [
@@ -37,7 +38,7 @@ def test_parse_embed():
     assert col.name == "Mi lista" and col.cover_url == "b"
     assert len(col.tracks) == 1
     assert col.tracks[0].artists == ["Luis Fonsi", "Daddy Yankee"]
-    assert col.tracks[0].duration_ms == 229000
+    assert col.duration_s == 229
 
 
 def test_score_prefers_original():
@@ -55,58 +56,123 @@ def test_safe_name():
     assert downloader.safe_name('AC/DC: "Back" in Black?') == "AC_DC_ _Back_ in Black_"
     assert downloader.safe_name("con") == "_con"
     assert downloader.safe_name("  ...  ") == "sin_nombre"
+    assert downloader.safe_name("Beyoncé – 東京", ascii_cd=True) == "Beyoncé – __"
 
 
-def _fake_audio(stem: Path, ext="mp3") -> Path:
-    out = stem.with_suffix("." + ext)
-    subprocess.run(
-        ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
-         "-b:a", "192k", str(out)], check=True)
+def test_plan_audio_splits_by_time():
+    items = [cd.Item(i, 240) for i in range(1, 51)]  # 50 canciones de 4 min = 200 min
+    discs = cd.plan(items, "audio")
+    assert len(discs) == 3
+    for d in discs:
+        assert d.seconds + cd.TRACK_GAP_SECONDS * (len(d.items) - 1) <= cd.AUDIO_CD_SECONDS
+    assert [it.index for d in discs for it in d.items] == list(range(1, 51))
+
+
+def test_plan_mp3_and_limits():
+    discs = cd.estimate([240.0] * 100, "mp3")  # ~9,7 MB cada una
+    assert len(discs) == 2 and len(discs[0].items) > 60
+    many = cd.plan([cd.Item(i, 1, size=1000) for i in range(1, 301)], "mp3")
+    assert [len(d.items) for d in many] == [255, 45]
+    assert len(cd.plan([cd.Item(i, 10) for i in range(1, 121)], "audio")[0].items) == 99
+
+
+def test_gain_never_clips():
+    assert downloader.gain_for((-20.0, -10.0)) == 8.0   # sube hasta -12 LUFS
+    assert downloader.gain_for((-20.0, -3.0)) == 2.0    # limitado por el pico (-1 dBTP)
+    assert downloader.gain_for((-7.0, 0.5)) == -5.0     # baja las canciones muy fuertes
+    assert downloader.gain_for(None) == 0.0
+
+
+def _fake_original(cache: Path, vid: str, freq: int) -> Path:
+    out = cache / f"{vid}.opus"
+    if not out.exists():
+        subprocess.run(
+            ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+             f"sine=frequency={freq}:duration=2:sample_rate=48000", "-c:a", "libopus", "-b:a", "160k", str(out)],
+            check=True)
     return out
 
 
-def test_full_pipeline(tmp_path, monkeypatch):
+@pytest.fixture
+def fake_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("LISTACD_CACHE", str(tmp_path / "cache"))
     col = spotify.Collection(name="Lista: Verano/2026", kind="playlist", tracks=[
-        Track(title="Canción Uno", artists=["Artista A"], duration_ms=1000, album="Álbum", cover_url="http://x/cover"),
-        Track(title="Canción Dos", artists=["Artista B", "Artista C"], duration_ms=1000),
-        Track(title="No Existe", artists=["Nadie"], duration_ms=1000),
+        Track(title="Canción Uno", artists=["Artista A"], duration_ms=2000, album="Álbum", cover_url="http://x/c",
+              spotify_id="a1"),
+        Track(title="Canción Dos", artists=["Artista B", "Artista C"], duration_ms=2000, spotify_id="a2"),
+        Track(title="No Existe", artists=["Nadie"], duration_ms=2000, spotify_id="a3"),
     ])
-    monkeypatch.setattr(spotify, "fetch", lambda url: col)
 
     class FakeMatcher:
+        calls = 0
+
         def find(self, t):
+            FakeMatcher.calls += 1
             if t.title == "No Existe":
                 return None
-            return Match("vid", t.title, t.artists, 1, 1.0, thumbnail="http://x/thumb")
+            return Match(f"vid{t.spotify_id}", t.title, t.artists, 2, 1.0, thumbnail="http://x/t")
 
-    jpeg = b"\xff\xd8\xff\xe0" + b"0" * 100
-    monkeypatch.setattr(core, "Matcher", FakeMatcher)
-    monkeypatch.setattr(core, "download_audio", lambda m, stem, fmt, br: _fake_audio(stem))
-    monkeypatch.setattr(core, "fetch_image", lambda url: jpeg)
+    from PIL import Image
+    import io
+    buf = io.BytesIO()
+    Image.new("RGB", (1200, 1200), "red").save(buf, "PNG")
+    monkeypatch.setattr(core, "download_original",
+                        lambda m, cache, cookies: _fake_original(cache, m.video_id, 440 if m.video_id.endswith("1") else 880))
+    monkeypatch.setattr(core, "fetch_image", lambda url: buf.getvalue())
+    s = Settings(output_dir=str(tmp_path / "out"), workers=2)
+    return col, s, FakeMatcher
 
-    res = core.download_collection("x", out_dir=tmp_path, numbered=True, log=lambda s: None)
-    folder = tmp_path / "Lista_ Verano_2026"
-    assert res.folder == folder
-    assert sorted(p.name for p in folder.glob("*.mp3")) == [
-        "1 - Artista A - Canción Uno.mp3", "2 - Artista B, Artista C - Canción Dos.mp3"]
-    assert len(res.failed) == 1 and (folder / "_canciones_fallidas.txt").exists()
-    m3u = (folder / "Lista_ Verano_2026.m3u8").read_text(encoding="utf-8").splitlines()
-    assert m3u == ["#EXTM3U", "1 - Artista A - Canción Uno.mp3", "2 - Artista B, Artista C - Canción Dos.mp3"]
 
+def test_pipeline_audio_cd(fake_env, tmp_path):
+    col, s, FakeMatcher = fake_env
+    s.mode = "audio"
+    events = []
+    res = core.run_job(col, s, events.append, matcher=FakeMatcher())
+    folder = tmp_path / "out" / "Lista_ Verano_2026" / "CD Audio"
+    assert res.folder == folder and len(res.discs) == 1 and len(res.failed) == 1
+    disc = folder / "Disco 1"
+    wavs = sorted(p.name for p in disc.glob("*.wav"))
+    assert wavs == ["01 - Artista A - Canción Uno.wav", "02 - Artista B, Artista C - Canción Dos.wav"]
+    import wave
+    with wave.open(str(disc / wavs[0])) as w:
+        assert (w.getnchannels(), w.getsampwidth(), w.getframerate()) == (2, 2, 44100)
+        assert abs(w.getnframes() / 44100 - 2) < 0.05
+    cue = (disc / "Disco 1.cue").read_text(encoding="cp1252")
+    assert 'FILE "01 - Artista A - Canción Uno.wav" WAVE' in cue
+    assert 'TITLE "Canción Dos"' in cue and "PREGAP 00:02:00" in cue
+    assert (folder / "canciones_no_encontradas.txt").exists()
+    assert not (folder / ".trabajo").exists()
+    assert any(e.kind == "track" and e.status == core.DONE for e in events)
+
+    # Segunda vez: usa la caché de coincidencias (no vuelve a buscar las encontradas)
+    before = FakeMatcher.calls
+    core.run_job(col, s, matcher=FakeMatcher())
+    assert FakeMatcher.calls - before == 1
+
+
+def test_pipeline_mp3_cd(fake_env, tmp_path):
+    col, s, FakeMatcher = fake_env
+    s.mode = "mp3"
+    res = core.run_job(col, s, matcher=FakeMatcher())
+    disc = res.discs[0].folder
+    files = sorted(p.name for p in disc.glob("*.mp3"))
+    assert files == ["01 - Artista A - Canción Uno.mp3", "02 - Artista B, Artista C - Canción Dos.mp3"]
     from mutagen.id3 import ID3
-    tags = ID3(folder / "2 - Artista B, Artista C - Canción Dos.mp3")
-    assert tags["TIT2"].text == ["Canción Dos"]
-    assert tags["TPE1"].text == ["Artista B, Artista C"]
-    assert tags.getall("APIC")[0].data == jpeg
+    from mutagen.mp3 import MP3
+    f = MP3(disc / files[1])
+    assert f.info.bitrate == 320000 and f.info.sample_rate == 44100
+    tags = ID3(disc / files[1])
+    assert tags["TPE1"].text == ["Artista B, Artista C"] and tags["TRCK"].text == ["2"]
+    from PIL import Image
+    import io
+    img = Image.open(io.BytesIO(tags.getall("APIC")[0].data))
+    assert img.format == "JPEG" and img.size == (500, 500)
 
-    # Segunda ejecución: no vuelve a descargar lo que ya existe
-    res2 = core.download_collection("x", out_dir=tmp_path, numbered=True, log=lambda s: None)
-    assert len(res2.skipped) == 2 and not res2.ok
 
-
-def test_tag_opus(tmp_path):
-    p = _fake_audio(tmp_path / "a", "opus")
-    downloader.tag_file(p, Track(title="T", artists=["A"]), b"\xff\xd8\xff" + b"0" * 50)
-    from mutagen import File
-    f = File(p)
-    assert f["title"] == ["T"] and "metadata_block_picture" in f
+def test_cancel(fake_env):
+    import threading
+    col, s, FakeMatcher = fake_env
+    ev = threading.Event()
+    ev.set()
+    res = core.run_job(col, s, cancel=ev, matcher=FakeMatcher())
+    assert res.cancelled and not res.discs

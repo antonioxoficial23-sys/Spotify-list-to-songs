@@ -10,7 +10,6 @@ Dos métodos:
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass, field
 
@@ -58,6 +57,11 @@ class Collection:
     cover_url: str = ""
     tracks: list[Track] = field(default_factory=list)
     truncated: bool = False  # True si se usó el embed y puede faltar algo
+    warning: str = ""
+
+    @property
+    def duration_s(self) -> float:
+        return sum(t.duration_s for t in self.tracks)
 
 
 def parse_url(url: str) -> tuple[str, str]:
@@ -67,27 +71,15 @@ def parse_url(url: str) -> tuple[str, str]:
     return m.group("kind"), m.group("id")
 
 
-def _load_dotenv(path: str = ".env") -> None:
-    """Carga KEY=VALOR de un archivo .env (si existe) sin pisar variables ya definidas."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-    except FileNotFoundError:
-        pass
-
-
-def fetch(url: str) -> Collection:
+def fetch(url: str, client_id: str = "", client_secret: str = "") -> Collection:
     kind, sid = parse_url(url)
-    _load_dotenv()
-    if os.environ.get("SPOTIFY_CLIENT_ID") and os.environ.get("SPOTIFY_CLIENT_SECRET"):
+    if client_id and client_secret:
         try:
-            return _fetch_api(kind, sid)
+            return _fetch_api(kind, sid, client_id, client_secret)
         except Exception as exc:  # p.ej. listas editoriales bloqueadas por la API
-            print(f"[aviso] La API de Spotify falló ({exc}); uso la página pública.")
+            col = _fetch_embed(kind, sid)
+            col.warning = f"La API de Spotify falló ({exc}); se usó la página pública."
+            return col
     return _fetch_embed(kind, sid)
 
 
@@ -117,11 +109,15 @@ def _track_from_api(t: dict, album: dict | None = None) -> Track:
     )
 
 
-def _fetch_api(kind: str, sid: str) -> Collection:
+def _fetch_api(kind: str, sid: str, client_id: str, client_secret: str) -> Collection:
     import spotipy
+    from spotipy.cache_handler import MemoryCacheHandler
     from spotipy.oauth2 import SpotifyClientCredentials
 
-    sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(), retries=5)
+    auth = SpotifyClientCredentials(
+        client_id=client_id, client_secret=client_secret, cache_handler=MemoryCacheHandler()
+    )
+    sp = spotipy.Spotify(auth_manager=auth, retries=5, requests_timeout=20)
 
     if kind == "track":
         t = sp.track(sid)

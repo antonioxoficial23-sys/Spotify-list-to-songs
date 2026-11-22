@@ -17,29 +17,38 @@ from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
 
 from . import __version__, burner, cd, spotify
-from .config import APP_NAME, Settings, resource_dir
+from .config import APP_NAME, Settings, cache_size, clear_cache, resource_dir
 from .core import CONVERTING, DONE, DOWNLOADING, FAILED, SEARCHING, Event, JobResult, run_job
 
-ACCENT = "#8B5CF6"
-ACCENT_HOVER = "#7C3AED"
-OK_GREEN = "#22C55E"
-WARN = "#F59E0B"
-ERR = "#EF4444"
-BG = "#0F1117"
-CARD = "#181B24"
-CARD_2 = "#20242F"
-MUTED = "#9AA3B5"
-TEXT = "#E8EAF0"
+# Paleta «salpicadero de noche»: grafito con luz ámbar.
+ACCENT = "#D97706"
+ACCENT_HOVER = "#B45309"
+ACCENT_SOFT = "#F59E0B"
+OK_GREEN = "#4ADE80"
+WARN = "#FBBF24"
+ERR = "#F87171"
+BG = "#121212"
+CARD = "#1C1C1E"
+CARD_2 = "#2A2A2D"
+HOVER = "#36363A"
+MUTED = "#A1A1AA"
+DIM = "#6B6B73"
+TEXT = "#F4F4F5"
+FAMILY = "Segoe UI" if sys.platform == "win32" else None
 
 MODE_LABELS = {"audio": "CD de audio", "mp3": "CD MP3"}
 MODE_HELP = {
-    "audio": "Máxima calidad (calidad CD, sin MP3).\nFunciona en cualquier radio de coche.\n"
-             "Unas 18–20 canciones por disco (80 min).",
-    "mp3": "MP3 320 kbps. Caben 60–80 canciones por disco.\n"
-           "Tu radio tiene que leer MP3 (lo pone en el\nfrontal o en el manual).",
+    "audio": "Calidad CD, sin pasar por MP3. Suena en\ncualquier radio. ~18–20 canciones por disco.",
+    "mp3": "MP3 320 kbps, ~60–80 canciones por disco.\nSolo si tu radio pone «MP3» en el frontal.",
 }
-STATUS_ICONS = {SEARCHING: "🔎 Buscando", DOWNLOADING: "⬇ Descargando",
-                CONVERTING: "⚙ Convirtiendo", DONE: "✔ Lista", FAILED: "✖ Error"}
+# Símbolos tipográficos: los emojis de color no se ven bien en Tk/Windows
+STATUS_ICONS = {SEARCHING: "● Buscando", DOWNLOADING: "● Descargando",
+                CONVERTING: "● Convirtiendo", DONE: "✓ Lista", FAILED: "✕ Error"}
+CHECK_ON, CHECK_OFF = "☑", "☐"
+
+
+def font(size: int = 13, weight: str = "normal") -> ctk.CTkFont:
+    return ctk.CTkFont(family=FAMILY, size=size, weight=weight) if FAMILY else ctk.CTkFont(size=size, weight=weight)
 
 
 def open_path(path: Path) -> None:
@@ -57,7 +66,6 @@ class SettingsDialog(ctk.CTkToplevel):
         self.app = master
         s = master.settings
         self.title("Ajustes")
-        self.geometry("560x520")
         self.resizable(False, False)
         self.configure(fg_color=BG)
         self.transient(master)
@@ -73,7 +81,7 @@ class SettingsDialog(ctk.CTkToplevel):
         self.out = ctk.CTkEntry(row)
         self.out.insert(0, s.output_dir)
         self.out.grid(row=0, column=0, sticky="ew")
-        ctk.CTkButton(row, text="Elegir…", width=90, fg_color=CARD_2, hover_color="#2B3040",
+        ctk.CTkButton(row, text="Elegir…", width=90, fg_color=CARD_2, hover_color=HOVER,
                       command=self._pick).grid(row=0, column=1, padx=(8, 0))
 
         ctk.CTkLabel(self, text="Claves de Spotify (para listas de más de 100 canciones)",
@@ -82,7 +90,7 @@ class SettingsDialog(ctk.CTkToplevel):
                     "marca «Web API», guarda y copia aquí el Client ID y el Client secret.")
         ctk.CTkLabel(self, text=help_txt, text_color=MUTED, justify="left").grid(row=3, **pad)
         ctk.CTkButton(self, text="Abrir el panel de desarrolladores de Spotify", fg_color=CARD_2,
-                      hover_color="#2B3040",
+                      hover_color=HOVER,
                       command=lambda: webbrowser.open("https://developer.spotify.com/dashboard")
                       ).grid(row=4, pady=6, **pad)
         self.cid = ctk.CTkEntry(self, placeholder_text="Client ID")
@@ -108,13 +116,34 @@ class SettingsDialog(ctk.CTkToplevel):
         self.workers.set(str(s.workers))
         self.workers.grid(row=1, column=1, padx=(12, 0))
 
+        cache_row = ctk.CTkFrame(self, fg_color="transparent")
+        cache_row.grid(row=9, pady=(8, 0), **pad)
+        cache_row.grid_columnconfigure(0, weight=1)
+        self.cache_lbl = ctk.CTkLabel(cache_row, text="", text_color=MUTED, anchor="w")
+        self.cache_lbl.grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(cache_row, text="Vaciar caché", width=120, fg_color=CARD_2, hover_color=HOVER,
+                      command=self._clear_cache).grid(row=0, column=1, padx=(12, 0))
+        self._show_cache()
+
         btns = ctk.CTkFrame(self, fg_color="transparent")
-        btns.grid(row=9, pady=20, **pad)
+        btns.grid(row=10, pady=20, **pad)
         btns.grid_columnconfigure(0, weight=1)
-        ctk.CTkButton(btns, text="Cancelar", fg_color=CARD_2, hover_color="#2B3040", width=110,
+        ctk.CTkButton(btns, text="Cancelar", fg_color=CARD_2, hover_color=HOVER, width=110,
                       command=self.destroy).grid(row=0, column=1, padx=6)
         ctk.CTkButton(btns, text="Guardar", fg_color=ACCENT, hover_color=ACCENT_HOVER, width=110,
                       command=self._save).grid(row=0, column=2)
+
+    def _show_cache(self):
+        mb = cache_size() / 1e6
+        self.cache_lbl.configure(text=f"Audios originales guardados: {mb:,.0f} MB\n"
+                                      "(aceleran volver a preparar una lista)".replace(",", "."))
+
+    def _clear_cache(self):
+        if self.app.busy:
+            messagebox.showinfo(APP_NAME, "Espera a que termine el trabajo en curso.", parent=self)
+            return
+        clear_cache()
+        self._show_cache()
 
     def _pick(self):
         d = filedialog.askdirectory(parent=self, initialdir=self.out.get())
@@ -146,6 +175,10 @@ class App(ctk.CTk):
         self.busy = False
         self.drives: list[burner.Drive] = []
         self.track_status: dict[int, str] = {}
+        self.track_errors: dict[int, str] = {}
+        self.excluded: set[int] = set()
+        self.burned: set[int] = set()
+        self.burning = False
 
         self.title(f"{APP_NAME} {__version__} — Listas de Spotify a CD")
         self.geometry("1180x760")
@@ -153,10 +186,10 @@ class App(ctk.CTk):
         self.configure(fg_color=BG)
         self._set_icon()
 
-        self.f_title = ctk.CTkFont(size=24, weight="bold")
-        self.f_h2 = ctk.CTkFont(size=18, weight="bold")
-        self.f_bold = ctk.CTkFont(size=14, weight="bold")
-        self.f_small = ctk.CTkFont(size=12)
+        self.f_title = font(24, "bold")
+        self.f_h2 = font(18, "bold")
+        self.f_bold = font(14, "bold")
+        self.f_small = font(12)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -168,6 +201,19 @@ class App(ctk.CTk):
         self.after(80, self._pump)
         if burner.available():
             self.after(400, self._refresh_drives)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        if self.burning:
+            if not messagebox.askyesno(
+                    APP_NAME, "Se está grabando un disco. Si cierras ahora, el CD quedará inservible.\n\n"
+                              "¿Cerrar de todas formas?", icon="warning"):
+                return
+        elif self.busy and not messagebox.askyesno(
+                APP_NAME, "Todavía se están preparando canciones. ¿Cerrar y cancelar?"):
+            return
+        self.cancel.set()
+        self.destroy()
 
     # ------------------------------------------------------------------ layout
 
@@ -187,23 +233,23 @@ class App(ctk.CTk):
         h = ctk.CTkFrame(self, fg_color="transparent")
         h.grid(row=0, column=0, sticky="ew", padx=24, pady=(18, 6))
         h.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(h, text="◉", font=ctk.CTkFont(size=30), text_color=ACCENT).grid(row=0, column=0, rowspan=2, padx=(0, 12))
+        ctk.CTkLabel(h, text="◉", font=font(30), text_color=ACCENT_SOFT).grid(row=0, column=0, rowspan=2, padx=(0, 12))
         ctk.CTkLabel(h, text=APP_NAME, font=self.f_title).grid(row=0, column=1, sticky="w")
         ctk.CTkLabel(h, text="De tu lista de Spotify a un CD para el coche, con la mejor calidad posible",
                      text_color=MUTED).grid(row=1, column=1, sticky="w")
-        ctk.CTkButton(h, text="⚙  Ajustes", width=110, fg_color=CARD_2, hover_color="#2B3040",
+        ctk.CTkButton(h, text="Ajustes", width=110, fg_color=CARD_2, hover_color=HOVER,
                       command=lambda: SettingsDialog(self)).grid(row=0, column=2, rowspan=2)
 
     def _build_input(self):
         f = ctk.CTkFrame(self, fg_color=CARD, corner_radius=14)
         f.grid(row=1, column=0, sticky="ew", padx=24, pady=8)
         f.grid_columnconfigure(0, weight=1)
-        self.url = ctk.CTkEntry(f, height=44, font=ctk.CTkFont(size=14), border_width=0, fg_color=CARD_2,
+        self.url = ctk.CTkEntry(f, height=44, font=font(14), border_width=0, fg_color=CARD_2,
                                 placeholder_text="Pega aquí el enlace de la lista de Spotify  (Compartir → Copiar enlace)")
         self.url.grid(row=0, column=0, sticky="ew", padx=(14, 8), pady=14)
         self.url.bind("<Return>", lambda e: self._load())
         self.paste_btn = ctk.CTkButton(f, text="Pegar", width=80, height=44, fg_color=CARD_2,
-                                       hover_color="#2B3040", command=self._paste)
+                                       hover_color=HOVER, command=self._paste)
         self.paste_btn.grid(row=0, column=1, pady=14)
         self.load_btn = ctk.CTkButton(f, text="Cargar lista", width=140, height=44, font=self.f_bold,
                                       fg_color=ACCENT, hover_color=ACCENT_HOVER, command=self._load)
@@ -222,7 +268,7 @@ class App(ctk.CTk):
         left.grid_rowconfigure(1, weight=1)
 
         self.cover_lbl = ctk.CTkLabel(left, text="♪", width=110, height=110, fg_color=CARD_2,
-                                      corner_radius=10, font=ctk.CTkFont(size=40), text_color=MUTED)
+                                      corner_radius=10, font=font(40), text_color=MUTED)
         self.cover_lbl.grid(row=0, column=0, padx=16, pady=16)
         info = ctk.CTkFrame(left, fg_color="transparent")
         info.grid(row=0, column=1, sticky="w")
@@ -239,10 +285,11 @@ class App(ctk.CTk):
         tree_frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=12, pady=(0, 12))
         tree_frame.grid_columnconfigure(0, weight=1)
         tree_frame.grid_rowconfigure(0, weight=1)
-        cols = ("n", "title", "artist", "dur", "disc", "status")
+        cols = ("sel", "n", "title", "artist", "dur", "disc", "status")
         self.tree = ttk.Treeview(tree_frame, columns=cols, show="headings", style="LCD.Treeview")
         for c, label, w, anchor, stretch in (
-            ("n", "#", 44, "e", False), ("title", "Canción", 280, "w", True),
+            ("sel", CHECK_ON, 34, "center", False),
+            ("n", "#", 40, "e", False), ("title", "Canción", 280, "w", True),
             ("artist", "Artista", 200, "w", True), ("dur", "Duración", 76, "e", False),
             ("disc", "CD", 44, "center", False), ("status", "Estado", 130, "w", False),
         ):
@@ -252,10 +299,15 @@ class App(ctk.CTk):
         sb = ctk.CTkScrollbar(tree_frame, command=self.tree.yview)
         sb.grid(row=0, column=1, sticky="ns")
         self.tree.configure(yscrollcommand=sb.set)
-        for tag, color in ((DONE, OK_GREEN), (FAILED, ERR), (DOWNLOADING, ACCENT),
-                           (CONVERTING, ACCENT), (SEARCHING, MUTED)):
+        for tag, color in ((DONE, "#CDEBD5"), (FAILED, ERR), (DOWNLOADING, ACCENT_SOFT),
+                           (CONVERTING, ACCENT_SOFT), (SEARCHING, MUTED), ("off", DIM)):
             self.tree.tag_configure(tag, foreground=color)
-        self.tree.tag_configure("odd", background="#1C1F29")
+        self.tree.tag_configure("odd", background="#202022")
+        self.tree.bind("<Button-1>", self._on_tree_click, add=True)
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self.sel_hint = ctk.CTkLabel(left, text="Pulsa ☑ para quitar o volver a poner una canción.",
+                                     text_color=DIM, font=self.f_small, anchor="w")
+        self.sel_hint.grid(row=2, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 10))
 
         # ---- derecha: opciones y acciones
         right = self.right = ctk.CTkScrollableFrame(body, fg_color=CARD, corner_radius=14, width=340)
@@ -266,7 +318,7 @@ class App(ctk.CTk):
         ctk.CTkLabel(right, text="1. Tipo de CD", font=self.f_bold, anchor="w").grid(row=0, pady=(16, 6), **p)
         self.mode_btn = ctk.CTkSegmentedButton(
             right, values=list(MODE_LABELS.values()), height=36, font=self.f_bold,
-            fg_color=CARD_2, unselected_color=CARD_2, unselected_hover_color="#2B3040",
+            fg_color=CARD_2, unselected_color=CARD_2, unselected_hover_color=HOVER,
             selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
             command=lambda v: self._set_mode("audio" if v == MODE_LABELS["audio"] else "mp3"))
         self.mode_btn.grid(row=1, **p)
@@ -287,17 +339,19 @@ class App(ctk.CTk):
         self.plan_lbl.grid(row=1, padx=12, pady=(0, 10), sticky="ew")
 
         ctk.CTkLabel(right, text="2. Preparar canciones", font=self.f_bold, anchor="w").grid(row=6, pady=(4, 6), **p)
-        self.go_btn = ctk.CTkButton(right, text="⬇  Descargar y preparar", height=44, font=self.f_bold,
+        self.go_btn = ctk.CTkButton(right, text="Descargar y preparar", height=44, font=self.f_bold,
                                     fg_color=ACCENT, hover_color=ACCENT_HOVER, command=self._start,
+                                    text_color_disabled="#FDE7C2",
                                     state="disabled")
+        self.go_btn.configure(fg_color=CARD_2, text_color_disabled=DIM)
         self.go_btn.grid(row=7, **p)
         self.progress = ctk.CTkProgressBar(right, progress_color=ACCENT, height=10)
         self.progress.set(0)
-        self.progress.grid(row=8, pady=(10, 2), **p)
+        self._progress_grid = dict(row=8, pady=(10, 2), **p)  # se muestra al empezar
         self.status_lbl = ctk.CTkLabel(right, text="", text_color=MUTED, anchor="w", justify="left",
                                        wraplength=300)
         self.status_lbl.grid(row=9, **p)
-        self.cancel_btn = ctk.CTkButton(right, text="Cancelar", fg_color=CARD_2, hover_color="#2B3040",
+        self.cancel_btn = ctk.CTkButton(right, text="Cancelar", fg_color=CARD_2, hover_color=HOVER,
                                         command=self._cancel)
 
         ctk.CTkLabel(right, text="3. Grabar", font=self.f_bold, anchor="w").grid(row=11, pady=(16, 6), **p)
@@ -308,7 +362,7 @@ class App(ctk.CTk):
             self.drive_menu = ctk.CTkOptionMenu(burn, values=["Buscando grabadoras…"], fg_color=CARD_2,
                                                 button_color=CARD_2, dynamic_resizing=False)
             self.drive_menu.grid(row=0, column=0, sticky="ew")
-            ctk.CTkButton(burn, text="↻", width=36, fg_color=CARD_2, hover_color="#2B3040",
+            ctk.CTkButton(burn, text="↻", width=36, fg_color=CARD_2, hover_color=HOVER,
                           command=self._refresh_drives).grid(row=0, column=1, padx=(6, 0))
         else:
             self.drive_menu = None
@@ -320,7 +374,7 @@ class App(ctk.CTk):
         self.discs_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(self.discs_frame, text="Aparecerán aquí cuando las canciones estén listas.",
                      text_color=MUTED, anchor="w").grid(row=0, sticky="ew")
-        self.open_btn = ctk.CTkButton(right, text="📂  Abrir carpeta", fg_color=CARD_2, hover_color="#2B3040",
+        self.open_btn = ctk.CTkButton(right, text="Abrir carpeta", fg_color=CARD_2, hover_color=HOVER,
                                       command=self._open_folder, state="disabled")
         self.open_btn.grid(row=14, pady=(10, 16), **p)
 
@@ -328,10 +382,10 @@ class App(ctk.CTk):
         st = ttk.Style(self)
         st.theme_use("default")
         st.configure("LCD.Treeview", background=CARD, fieldbackground=CARD, foreground=TEXT,
-                     rowheight=28, borderwidth=0, font=("Segoe UI", 10))
+                     rowheight=28, borderwidth=0, font=(FAMILY or "TkDefaultFont", 10))
         st.configure("LCD.Treeview.Heading", background=CARD_2, foreground=MUTED, relief="flat",
-                     font=("Segoe UI", 10, "bold"), padding=(6, 6))
-        st.map("LCD.Treeview", background=[("selected", "#2E2A4A")], foreground=[("selected", TEXT)])
+                     font=(FAMILY or "TkDefaultFont", 10, "bold"), padding=(6, 6))
+        st.map("LCD.Treeview", background=[("selected", "#3A2A12")], foreground=[("selected", TEXT)])
         st.map("LCD.Treeview.Heading", background=[("active", CARD_2)])
         st.layout("LCD.Treeview", [("Treeview.treearea", {"sticky": "nswe"})])
 
@@ -366,14 +420,23 @@ class App(ctk.CTk):
         col = self.collection
         if not col:
             return
-        discs = cd.estimate([t.duration_s for t in col.tracks], self.settings.mode)
+        pairs = [(i, t.duration_s) for i, t in enumerate(col.tracks, 1) if i not in self.excluded]
+        discs = cd.estimate(pairs, self.settings.mode)
+        for iid in self.tree.get_children():
+            self.tree.set(iid, "disc", "")
         self._apply_plan(discs, estimate=True)
+        if not self.busy:
+            self._set_go(bool(pairs))
 
     def _apply_plan(self, discs: list[cd.Disc], estimate: bool):
         n = len(discs)
         kind = "de 80 min" if self.settings.mode == "audio" else "de 700 MB"
         pre = "≈ " if estimate else ""
-        self.plan_title.configure(text=f"{pre}{n} CD-R {kind}" if n != 1 else f"{pre}1 CD-R {kind}")
+        if n == 0:
+            self.plan_title.configure(text="Ninguna canción seleccionada")
+            self.plan_lbl.configure(text="")
+            return
+        self.plan_title.configure(text=f"{pre}{n} CD-R {kind}")
         lines = []
         for d in discs:
             size = (f"{cd.fmt_time(d.seconds)}" if self.settings.mode == "audio"
@@ -445,12 +508,15 @@ class App(ctk.CTk):
 
         self.tree.delete(*self.tree.get_children())
         self.track_status.clear()
+        self.track_errors.clear()
+        self.excluded.clear()
+        self.burned.clear()
         for i, t in enumerate(col.tracks, 1):
-            self.tree.insert("", "end", iid=str(i), values=(i, t.title, t.artist, cd.fmt_time(t.duration_s), "", ""),
+            self.tree.insert("", "end", iid=str(i),
+                             values=(CHECK_ON, i, t.title, t.artist, cd.fmt_time(t.duration_s), "", ""),
                              tags=("odd",) if i % 2 else ())
         self._update_plan()
         self._show_discs()
-        self.go_btn.configure(state="normal")
         self.status_lbl.configure(text="")
         self.progress.set(0)
 
@@ -461,19 +527,25 @@ class App(ctk.CTk):
         self.cancel.clear()
         self.result = None
         self._show_discs()
-        self.go_btn.configure(state="disabled", text="Preparando…")
+        self._set_go(False, "Preparando…")
+        self._show_progress()
         self.load_btn.configure(state="disabled")
         self.cancel_btn.grid(row=10, padx=16, pady=(6, 0), sticky="ew")
         self.progress.set(0)
         self.status_lbl.configure(text="Empezando…")
+        self.track_errors.clear()
+        self.burned.clear()
         for iid in self.tree.get_children():
             self.tree.set(iid, "status", "")
+            self._retag(int(iid))
         self.t0 = time.time()
         col, s = self.collection, self.settings
+        include = {i for i in range(1, len(col.tracks) + 1) if i not in self.excluded}
 
         def job():
             try:
-                res = run_job(col, s, on_event=lambda e: self.events.put(("event", e)), cancel=self.cancel)
+                res = run_job(col, s, on_event=lambda e: self.events.put(("event", e)),
+                              cancel=self.cancel, include=include)
                 self.events.put(("job_done", res))
             except Exception as exc:
                 self.events.put(("job_error", exc))
@@ -489,10 +561,10 @@ class App(ctk.CTk):
             iid = str(e.index)
             if self.tree.exists(iid):
                 self.tree.set(iid, "status", STATUS_ICONS.get(e.status, e.status))
-                tags = [e.status] + (["odd"] if e.index % 2 else [])
-                self.tree.item(iid, tags=tags)
-                if e.status in (DOWNLOADING,):
-                    self.tree.see(iid)
+                self.track_status[e.index] = e.status
+                if e.status == FAILED:
+                    self.track_errors[e.index] = e.text
+                self._retag(e.index)
         elif e.kind == "progress":
             self.progress.set(e.done / max(1, e.total))
             elapsed = time.time() - self.t0
@@ -504,7 +576,7 @@ class App(ctk.CTk):
     def _on_job_done(self, res: JobResult):
         self.busy = False
         self.cancel_btn.grid_forget()
-        self.go_btn.configure(state="normal", text="⬇  Descargar y preparar")
+        self._set_go(True, "Descargar y preparar")
         self.load_btn.configure(state="normal")
         if res.cancelled:
             self.status_lbl.configure(text="Cancelado.")
@@ -512,9 +584,9 @@ class App(ctk.CTk):
         self.result = res
         self._apply_plan(res.discs, estimate=False)
         ok = sum(len(d.items) for d in res.discs)
-        msg = f"✔ {ok} canciones listas en {len(res.discs)} disco(s)."
+        msg = f"✓ {ok} canciones listas en {len(res.discs)} disco(s)."
         if res.failed:
-            msg += f"\n✖ {len(res.failed)} no se encontraron (ver lista)."
+            msg += f"\n✕ {len(res.failed)} no se encontraron (ver lista)."
         self.status_lbl.configure(text=msg)
         self.progress.set(1)
         self.open_btn.configure(state="normal")
@@ -535,12 +607,72 @@ class App(ctk.CTk):
             return
         for r, d in enumerate(res.discs):
             dur = cd.fmt_time(d.seconds)
+            done = d.number in self.burned
+            label = (f"✓ Disco {d.number} grabado · grabar otra copia" if done
+                     else f"Grabar disco {d.number}   ·   {len(d.items)} canciones · {dur}")
             ctk.CTkButton(
-                self.discs_frame, text=f"💿  Grabar disco {d.number}   ({len(d.items)} canciones · {dur})",
-                height=38, anchor="w", fg_color=CARD_2, hover_color=ACCENT_HOVER,
+                self.discs_frame, text=label, height=38, anchor="w",
+                fg_color="#1F3A28" if done else CARD_2, hover_color=ACCENT_HOVER,
                 state="normal" if self.drive_menu else "disabled",
                 command=lambda d=d: self._burn(d),
             ).grid(row=r, pady=3, sticky="ew")
+
+    def _set_go(self, enabled: bool, text: str | None = None):
+        """Botón principal: gris cuando no se puede pulsar, ámbar cuando sí."""
+        kw = {"text": text} if text else {}
+        busy_look = not enabled and text is not None
+        self.go_btn.configure(state="normal" if enabled else "disabled",
+                              fg_color=ACCENT if enabled or busy_look else CARD_2,
+                              text_color_disabled="#FDE7C2" if busy_look else DIM, **kw)
+
+    def _show_progress(self):
+        if not self.progress.winfo_ismapped():
+            self.progress.grid(**self._progress_grid)
+
+    def _retag(self, index: int):
+        iid = str(index)
+        if not self.tree.exists(iid):
+            return
+        off = index in self.excluded
+        tags = ["off"] if off else ([self.track_status[index]] if index in self.track_status else [])
+        if index % 2:
+            tags.append("odd")
+        self.tree.item(iid, tags=tags)
+        self.tree.set(iid, "sel", CHECK_OFF if off else CHECK_ON)
+
+    def _on_tree_click(self, event):
+        if self.tree.identify_region(event.x, event.y) == "heading":
+            if self.tree.identify_column(event.x) == "#1" and self.collection and not self.busy:
+                # Cabecera ☑: poner o quitar todas
+                n = len(self.collection.tracks)
+                self.excluded = set() if self.excluded else set(range(1, n + 1))
+                for i in range(1, n + 1):
+                    self._retag(i)
+                self._invalidate()
+            return
+        if self.tree.identify_column(event.x) != "#1" or self.busy:
+            return
+        iid = self.tree.identify_row(event.y)
+        if not iid:
+            return
+        i = int(iid)
+        self.excluded.symmetric_difference_update({i})
+        self._retag(i)
+        self._invalidate()
+        return "break"
+
+    def _invalidate(self):
+        """La selección cambió: el resultado anterior ya no corresponde."""
+        if self.result:
+            self.result = None
+            self._show_discs()
+        self._update_plan()
+
+    def _on_tree_select(self, _event=None):
+        sel = self.tree.selection()
+        if sel and int(sel[0]) in self.track_errors and not self.busy:
+            t = self.collection.tracks[int(sel[0]) - 1]
+            self.status_lbl.configure(text=f"✕ {t.title}: {self.track_errors[int(sel[0])]}")
 
     def _open_folder(self):
         if self.result:
@@ -621,6 +753,8 @@ class App(ctk.CTk):
             return
 
         self.progress.set(0)
+        self._show_progress()
+        self.burning = True
         name = self.collection.name if self.collection else APP_NAME
 
         def prog(text, frac):
@@ -640,8 +774,11 @@ class App(ctk.CTk):
 
     def _on_burn_done(self, disc: cd.Disc):
         self.busy = False
+        self.burning = False
+        self.burned.add(disc.number)
+        self._show_discs()
         self.progress.set(1)
-        self.status_lbl.configure(text=f"✔ Disco {disc.number} grabado.")
+        self.status_lbl.configure(text=f"✓ Disco {disc.number} grabado.")
         nxt = disc.number + 1
         extra = (f"\n\nMete otro CD-R virgen y pulsa «Grabar disco {nxt}»."
                  if self.result and nxt <= len(self.result.discs) else "")
@@ -649,6 +786,7 @@ class App(ctk.CTk):
 
     def _on_burn_error(self, exc: Exception):
         self.busy = False
+        self.burning = False
         self.status_lbl.configure(text=f"Error al grabar: {exc}")
         cue_hint = ""
         if self.result and self.result.mode == "audio":

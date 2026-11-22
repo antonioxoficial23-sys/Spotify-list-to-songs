@@ -98,6 +98,14 @@ python -m pytest                    # pruebas
 - `listacd/burner.py`: grabación con IMAPI2 de Windows.
 - `listacd/gui.py`: interfaz (CustomTkinter).
 
+### Skills de Claude Code incluidas
+
+- `CLAUDE.md`: mapa corto del proyecto para que Claude no gaste tokens explorando.
+- `/probar-listacd`: pruebas + comprobación interna + capturas de la interfaz sin pantalla.
+- `/critica-listacd`: crítica estructurada (diseño, usabilidad, audio, coche, robustez, recursos)
+  con tabla de hallazgos por gravedad. Flujo recomendado: `/critica-listacd` → aplicar mejoras →
+  `/probar-listacd`. La primera crítica y su resolución están en `docs/critica-1.md`.
+
 El `.exe` y el instalador se generan en GitHub Actions (`.github/workflows/build-windows.yml`) con
 PyInstaller e Inno Setup; para publicar una versión, crea una etiqueta `vX.Y.Z`.
 

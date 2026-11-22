@@ -41,6 +41,20 @@ def cache_dir() -> Path:
     return d
 
 
+def cache_size() -> int:
+    return sum(p.stat().st_size for p in cache_dir().glob("*") if p.is_file())
+
+
+def clear_cache() -> None:
+    """Borra los audios originales (no las coincidencias ni el volumen medido, que pesan poco)."""
+    for p in cache_dir().glob("*"):
+        if p.is_file() and p.suffix != ".json":
+            try:
+                p.unlink()
+            except OSError:
+                pass
+
+
 def default_output_dir() -> str:
     music = Path.home() / "Music"
     return str((music if music.exists() else Path.home()) / APP_NAME)

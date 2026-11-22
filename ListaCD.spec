@@ -17,7 +17,7 @@ a = Analysis(
     datas=datas,
     binaries=binaries,
     hiddenimports=hiddenimports,
-    excludes=["matplotlib", "numpy", "pytest"],
+    excludes=["matplotlib", "numpy", "pytest", "curl_cffi"],
 )
 pyz = PYZ(a.pure)
 exe = EXE(

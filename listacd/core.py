@@ -46,8 +46,8 @@ class Cancelled(Exception):
     pass
 
 
-class MatchCache:
-    """Recuerda qué vídeo corresponde a cada canción para no volver a buscar."""
+class JsonCache:
+    """Pequeña caché persistente en JSON, segura entre hilos."""
 
     def __init__(self, path: Path):
         self.path = path
@@ -57,20 +57,19 @@ class MatchCache:
         except (OSError, ValueError):
             self.data = {}
 
-    @staticmethod
-    def key(t: spotify.Track) -> str:
-        return t.spotify_id or f"{t.artist}|{t.title}|{int(t.duration_s)}".lower()
+    def get(self, key: str):
+        return self.data.get(key)
 
-    def get(self, t: spotify.Track) -> Match | None:
-        d = self.data.get(self.key(t))
-        return Match(**d) if d else None
-
-    def put(self, t: spotify.Track, m: Match) -> None:
+    def put(self, key: str, value) -> None:
         with self.lock:
-            self.data[self.key(t)] = m.__dict__
+            self.data[key] = value
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
             tmp.replace(self.path)
+
+
+def track_key(t: spotify.Track) -> str:
+    return t.spotify_id or f"{t.artist}|{t.title}|{int(t.duration_s)}".lower()
 
 
 def output_folder(col: spotify.Collection, settings: Settings) -> Path:
@@ -92,7 +91,9 @@ def run_job(
     on_event: Callable[[Event], None] = lambda e: None,
     cancel: threading.Event | None = None,
     matcher: Matcher | None = None,
+    include: set[int] | None = None,
 ) -> JobResult:
+    """Procesa la lista. `include` = posiciones (1..N) a incluir; None = todas."""
     cancel = cancel or threading.Event()
     mode = settings.mode
     ffmpeg()  # falla pronto si no está
@@ -107,12 +108,14 @@ def run_job(
     work.mkdir()
 
     cache = cache_dir()
-    matches = MatchCache(cache / "coincidencias.json")
+    matches = JsonCache(cache / "coincidencias.json")
+    loudness = JsonCache(cache / "volumen.json")
     matcher = matcher or Matcher()
     covers: dict[int, bytes | None] = {}
     items: dict[int, cd.Item] = {}
     result = JobResult(folder=folder, mode=mode)
-    total = len(col.tracks)
+    selected = [(i, t) for i, t in enumerate(col.tracks, 1) if include is None or i in include]
+    total = len(selected)
 
     def process(idx: int, t: spotify.Track) -> cd.Item:
         def step(status: str):
@@ -121,18 +124,26 @@ def run_job(
             on_event(Event("track", index=idx, status=status))
 
         step(SEARCHING)
-        m = matches.get(t)
+        cached = matches.get(track_key(t))
+        m = Match(**cached) if cached else None
         if m is None:
             m = matcher.find(t)
             if m is None:
                 raise LookupError("No se encontró en YouTube Music")
-            matches.put(t, m)
+            matches.put(track_key(t), m.__dict__)
 
         step(DOWNLOADING)
         original = download_original(m, cache, settings.cookies_browser)
 
         step(CONVERTING)
-        gain = gain_for(measure_loudness(original)) if settings.normalize else 0.0
+        gain = 0.0
+        if settings.normalize:
+            loud = loudness.get(m.video_id)
+            if loud is None:
+                loud = measure_loudness(original)
+                if loud is not None:
+                    loudness.put(m.video_id, list(loud))
+            gain = gain_for(tuple(loud) if loud else None)
         if mode == "audio":
             out = to_cd_wav(original, work / f"{idx:04d}.wav", gain)
             seconds = wav_duration(out)
@@ -145,7 +156,7 @@ def run_job(
     log(f"Preparando «{col.name}» ({total} canciones) en {folder}")
     done = 0
     with ThreadPoolExecutor(max_workers=max(1, settings.workers)) as pool:
-        futures = {pool.submit(process, i, t): (i, t) for i, t in enumerate(col.tracks, 1)}
+        futures = {pool.submit(process, i, t): (i, t) for i, t in selected}
         try:
             for fut in as_completed(futures):
                 i, t = futures[fut]

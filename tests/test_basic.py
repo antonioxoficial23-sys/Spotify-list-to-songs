@@ -176,3 +176,31 @@ def test_cancel(fake_env):
     ev.set()
     res = core.run_job(col, s, cancel=ev, matcher=FakeMatcher())
     assert res.cancelled and not res.discs
+
+
+def test_include_and_loudness_cache(fake_env, monkeypatch):
+    col, s, FakeMatcher = fake_env
+    s.mode = "audio"
+    calls = []
+    real = core.measure_loudness
+    monkeypatch.setattr(core, "measure_loudness", lambda p: calls.append(p) or real(p))
+    res = core.run_job(col, s, matcher=FakeMatcher(), include={2})
+    assert [it.index for d in res.discs for it in d.items] == [2] and not res.failed
+    assert len(calls) == 1
+    core.run_job(col, s, matcher=FakeMatcher(), include={2})
+    assert len(calls) == 1  # el volumen medido sale de la caché
+
+
+def test_estimate_with_pairs():
+    discs = cd.estimate([(3, 100.0), (7, 200.0)], "audio")
+    assert [it.index for it in discs[0].items] == [3, 7]
+
+
+def test_clear_cache(tmp_path, monkeypatch):
+    from listacd import config
+    monkeypatch.setenv("LISTACD_CACHE", str(tmp_path))
+    (tmp_path / "a.opus").write_bytes(b"x" * 10)
+    (tmp_path / "coincidencias.json").write_text("{}")
+    assert config.cache_size() == 12
+    config.clear_cache()
+    assert [p.name for p in tmp_path.iterdir()] == ["coincidencias.json"]

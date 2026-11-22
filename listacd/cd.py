@@ -75,9 +75,13 @@ def plan(items: list[Item], mode: str) -> list[Disc]:
     return discs
 
 
-def estimate(durations_s: list[float], mode: str) -> list[Disc]:
-    """Estimación antes de descargar (MP3 320 kbps = 40.000 bytes/s)."""
-    items = [Item(i, d, size=int(d * 40_000) + 60_000) for i, d in enumerate(durations_s, 1)]
+def estimate(durations_s: list[float] | list[tuple[int, float]], mode: str) -> list[Disc]:
+    """Estimación antes de descargar (MP3 320 kbps = 40.000 bytes/s).
+
+    Acepta duraciones o pares (posición, duración) si se han quitado canciones.
+    """
+    pairs = [d if isinstance(d, tuple) else (i, d) for i, d in enumerate(durations_s, 1)]
+    items = [Item(i, d, size=int(d * 40_000) + 60_000) for i, d in pairs]
     return plan(items, mode)
 
 

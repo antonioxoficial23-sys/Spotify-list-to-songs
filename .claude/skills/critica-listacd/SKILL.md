@@ -10,8 +10,9 @@ solo quiere un CD para el coche. No edites archivos. Gasta pocos tokens: lee sol
 del mapa de CLAUDE.md que afecten a cada apartado y usa Grep antes que leer archivos enteros.
 
 ## 1. Observa
-- Captura las 4 pantallas con el paso 3 de la skill `probar-listacd` y míralas.
-- Lee `listacd/gui.py` y las funciones implicadas en el flujo que estés juzgando.
+- Captura las pantallas con el paso 3 de la skill `probar-listacd` y míralas.
+- Lee `listacd/web/` (interfaz principal) y las funciones de `listacd/webapp.py` implicadas.
+- Para el diseño, juzga también contra la skill `frontend-design` y el plan de `docs/diseno.md`.
 
 ## 2. Evalúa cada apartado
 

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ListaCD</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="brand-disc" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="15"/><circle cx="16" cy="16" r="4.5" class="hole"/></svg>
+    <span>ListaCD</span>
+  </div>
+  <form class="link" id="link-form">
+    <label class="sr" for="url">Enlace de la lista de Spotify</label>
+    <input id="url" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Pega el enlace de tu lista de Spotify">
+    <button type="button" class="btn quiet" id="paste">Pegar</button>
+    <button type="submit" class="btn primary" id="load">Cargar lista</button>
+  </form>
+  <button class="btn quiet" id="open-settings">Ajustes</button>
+</header>
+
+<main>
+  <section class="deck" aria-label="Discos">
+    <div class="disc-stage">
+      <div class="disc" id="disc" style="--burn:0">
+        <div class="disc-burn"></div>
+        <div class="disc-hub"></div>
+        <p class="disc-title" id="disc-title">Tu lista aquí</p>
+      </div>
+    </div>
+    <div class="chips" id="chips" aria-label="Discos necesarios"></div>
+    <p class="plan" id="plan">Pega un enlace para ver cuántos CD necesitas.</p>
+
+    <div class="controls">
+      <p class="summary" id="summary" hidden><span id="summary-text"></span>
+        <button class="btn link" id="change">Cambiar</button></p>
+      <div class="options" id="options">
+      <div class="segmented" role="radiogroup" aria-label="Tipo de CD">
+        <button role="radio" data-mode="audio" aria-checked="true">CD de audio</button>
+        <button role="radio" data-mode="mp3" aria-checked="false">CD MP3</button>
+      </div>
+      <p class="hint" id="mode-hint"></p>
+      <label class="switch">
+        <input type="checkbox" id="normalize" checked>
+        <span class="track" aria-hidden="true"></span>
+        <span>Igualar el volumen entre canciones</span>
+      </label>
+      </div>
+
+      <button class="btn primary big" id="prepare" disabled>Preparar los discos</button>
+      <div class="status" id="status" aria-live="polite"></div>
+      <button class="btn link" id="cancel" hidden>Cancelar</button>
+
+      <div class="burn" id="burn" hidden>
+        <label class="field">
+          <span>Grabadora</span>
+          <select id="drive"></select>
+        </label>
+        <div class="burn-list" id="burn-list"></div>
+        <button class="btn quiet" id="open-folder">Abrir la carpeta de los discos</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="insert" aria-label="Lista de canciones">
+    <div class="paper">
+      <header class="insert-head" id="insert-head">
+        <img id="cover" alt="" hidden>
+        <div>
+          <h1 id="list-name">Tu lista de canciones</h1>
+          <p id="list-meta">Aparecerá aquí, repartida en discos, en cuanto cargues un enlace.</p>
+          <p class="warn" id="list-warn" hidden></p>
+        </div>
+      </header>
+      <div class="tracks" id="tracks"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg-settings">
+  <form method="dialog" class="dlg">
+    <h2>Ajustes</h2>
+    <label class="field"><span>Carpeta donde se guardan los discos</span>
+      <span class="row"><input id="s-out" type="text"><button type="button" class="btn quiet" id="s-pick">Elegir</button></span>
+    </label>
+    <h3>Listas de más de 100 canciones</h3>
+    <p class="hint">Spotify pide unas claves gratuitas. Entra en el panel de desarrolladores con tu cuenta,
+      crea una app con «Web API» marcado y copia aquí el Client ID y el Client secret.</p>
+    <button type="button" class="btn link" id="s-dash">Abrir el panel de desarrolladores de Spotify</button>
+    <label class="field"><span>Client ID</span><input id="s-id" type="text" autocomplete="off"></label>
+    <label class="field"><span>Client secret</span><input id="s-secret" type="password" autocomplete="off" placeholder="Sin cambios"></label>
+    <h3>Si YouTube pide verificación</h3>
+    <label class="field"><span>Usar la sesión de este navegador</span>
+      <select id="s-cookies"><option value="">Ninguno</option><option>firefox</option><option>chrome</option><option>edge</option><option>brave</option><option>opera</option></select>
+    </label>
+    <label class="field"><span>Canciones a la vez</span>
+      <select id="s-workers"><option>1</option><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option></select>
+    </label>
+    <p class="hint row"><span id="s-cache"></span><button type="button" class="btn link" id="s-clear">Vaciar</button></p>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn quiet">Cancelar</button>
+      <button value="save" class="btn primary" id="s-save">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlg-msg">
+  <form method="dialog" class="dlg small">
+    <h2 id="m-title"></h2>
+    <p id="m-text"></p>
+    <div class="dlg-actions">
+      <button value="cancel" class="btn quiet" id="m-cancel">Cancelar</button>
+      <button value="ok" class="btn primary" id="m-ok">Aceptar</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

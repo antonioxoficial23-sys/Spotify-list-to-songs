@@ -76,6 +76,16 @@ def find_binary(name: str) -> str | None:
     return shutil.which(name)
 
 
+def open_path(path: Path) -> None:
+    """Abre una carpeta en el explorador del sistema."""
+    if sys.platform == "win32":
+        os.startfile(path)  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path)])
+
+
 # En Windows evita que se abra una ventana negra por cada llamada a ffmpeg
 NO_WINDOW = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
 

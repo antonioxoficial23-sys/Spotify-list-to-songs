@@ -57,10 +57,35 @@ def selftest(out: str) -> int:
     check("ytmusicapi", lambda: __import__("ytmusicapi").__name__)
     check("spotipy", lambda: __import__("spotipy").__name__)
     check("customtkinter", lambda: __import__("customtkinter").__version__)
+    check("interfaz web", lambda: all((Path(__file__).parent / "web" / f).exists()
+                                      for f in ("index.html", "app.css", "app.js")) and "archivos OK")
+    if sys.platform == "win32":
+        def webview_check():
+            import webview
+            from webview.platforms import winforms  # noqa: F401  (carga pythonnet y WebView2)
+
+            return f"pywebview {webview.__version__ if hasattr(webview, '__version__') else ''} + WebView2"
+        check("pywebview", webview_check)
     if sys.platform == "win32":
         check("IMAPI2", burner.self_test)
     Path(out).write_text("\n".join(lines) + "\n", encoding="utf-8")
     return 0 if ok else 1
+
+
+def launch_gui() -> int:
+    """Interfaz HTML (WebView2); si no está disponible, la ventana clásica."""
+    try:
+        from .webapp import run_web
+
+        run_web()
+    except Exception:
+        from .config import config_dir
+
+        (config_dir() / "error_interfaz.log").write_text(traceback.format_exc(), encoding="utf-8")
+        from .gui import run_gui
+
+        run_gui()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -75,10 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.selftest:
         return selftest(args.selftest)
     if not args.url:
-        from .gui import run_gui
-
-        run_gui()
-        return 0
+        return launch_gui()
 
     from . import spotify
     from .config import Settings

@@ -9,7 +9,13 @@ Ejecuta en este orden y para en el primer fallo:
 
 1. `python -m pytest -q`
 2. `python -m listacd --selftest /tmp/st.txt && cat /tmp/st.txt`
-3. Capturas de la interfaz (requiere `python3-tk` y `xvfb`; en Linux usa un Python con tkinter):
+3. Capturas de la interfaz principal (HTML; usa el Playwright de Node ya instalado, sin red ni Python):
+   ```bash
+   for s in vacia preparando lista grabando ajustes; do node tools/captura_web.js $s /tmp/web_$s.png; done
+   node tools/captura_web.js lista /tmp/web_pequena.png 1024 700   # tamaño mínimo
+   ```
+   Los datos salen de `tools/web_demo.js`. Cualquier «ERROR JS» impreso es un fallo.
+   Ventana clásica de reserva (requiere `python3-tk` y `xvfb`; en Linux usa un Python con tkinter):
    ```bash
    Xvfb :99 -screen 0 1280x800x24 & sleep 1
    for s in vacia cargada progreso lista; do

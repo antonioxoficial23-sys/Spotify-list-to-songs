@@ -17,7 +17,7 @@ from tkinter import filedialog, messagebox, ttk
 import customtkinter as ctk
 
 from . import __version__, burner, cd, spotify
-from .config import APP_NAME, Settings, cache_size, clear_cache, resource_dir
+from .config import APP_NAME, Settings, cache_size, clear_cache, open_path, resource_dir
 from .core import CONVERTING, DONE, DOWNLOADING, FAILED, SEARCHING, Event, JobResult, run_job
 
 # Paleta «salpicadero de noche»: grafito con luz ámbar.
@@ -49,15 +49,6 @@ CHECK_ON, CHECK_OFF = "☑", "☐"
 
 def font(size: int = 13, weight: str = "normal") -> ctk.CTkFont:
     return ctk.CTkFont(family=FAMILY, size=size, weight=weight) if FAMILY else ctk.CTkFont(size=size, weight=weight)
-
-
-def open_path(path: Path) -> None:
-    if sys.platform == "win32":
-        os.startfile(path)  # type: ignore[attr-defined]
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", str(path)])
-    else:
-        subprocess.Popen(["xdg-open", str(path)])
 
 
 class SettingsDialog(ctk.CTkToplevel):

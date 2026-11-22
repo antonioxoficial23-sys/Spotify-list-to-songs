@@ -9,16 +9,19 @@ Interfaz y mensajes al usuario en español.
 - `listacd/downloader.py` descarga original (yt-dlp), volumen, conversión ffmpeg, etiquetas.
 - `listacd/core.py` `run_job()`: orquesta y emite `Event`s; reparte en discos.
 - `listacd/cd.py` reparto en discos y `.cue`. `listacd/burner.py` grabación IMAPI2 (solo Windows).
-- `listacd/gui.py` interfaz. `listacd/cli.py` entrada (+ `--selftest`).
+- `listacd/web/` interfaz principal (HTML/CSS/JS) y `listacd/webapp.py` su puente (`Api`, eventos con `poll()`).
+- `listacd/gui.py` ventana clásica de reserva (si falta WebView2). `listacd/cli.py` entrada (+ `--selftest`).
+- Diseño: `docs/diseno.md` (tokens y concepto). Para cambios visuales, usa la skill `frontend-design`.
 - Build: `ListaCD.spec`, `installer/ListaCD.iss`, `.github/workflows/build-windows.yml`.
 
 ## Comandos
 - Pruebas: `python -m pytest -q` (necesita ffmpeg en el PATH).
 - Comprobación interna: `python -m listacd --selftest salida.txt`.
-- Captura de la interfaz sin pantalla: ver skill `probar-listacd`.
+- Captura de la interfaz: `node tools/captura_web.js lista /tmp/x.png` (ver skill `probar-listacd`).
 
 ## Reglas
 - No hay red a Spotify/YouTube en el sandbox: prueba con dobles (ver `tests/`).
 - Nunca recodificar dos veces con pérdida: siempre desde el original en caché.
+- Atributos internos de `webapp.Api` con `_` (pywebview expone a JS todo lo público).
 - Todo lo de COM/IMAPI2 en el hilo que lo crea; la GUI solo se toca desde el hilo principal (cola `events`).
 - Tras cambiar algo de Windows, verificar el job `windows` de GitHub Actions (hace el selftest del .exe).

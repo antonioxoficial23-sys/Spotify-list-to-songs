@@ -204,3 +204,31 @@ def test_clear_cache(tmp_path, monkeypatch):
     assert config.cache_size() == 12
     config.clear_cache()
     assert [p.name for p in tmp_path.iterdir()] == ["coincidencias.json"]
+
+
+def test_webapp_bridge(fake_env, monkeypatch):
+    """El puente que usa la interfaz HTML: plan, preparar y eventos."""
+    import time
+    from listacd import webapp
+    col, s, FakeMatcher = fake_env
+    s.mode = "audio"
+    monkeypatch.setattr(webapp.Settings, "load", classmethod(lambda cls: s))
+    monkeypatch.setattr(core, "Matcher", FakeMatcher)
+    api = webapp.Api()
+    assert api.plan([]) == []
+    assert api.load("https://example.com")["ok"] is False
+    api._col = col
+    assert [d["items"] for d in api.plan([2])] == [[1, 3]]
+    assert api.start([3]) is True
+    events = []
+    for _ in range(200):
+        events += api.poll()
+        if any(e["type"] == "job_done" for e in events):
+            break
+        time.sleep(0.05)
+    done = next(e for e in events if e["type"] == "job_done")
+    assert done["discs"][0]["items"] == [1, 2] and not done["failed"]
+    assert any(e["type"] == "progress" for e in events)
+    assert api.init()["settings"]["mode"] == "audio"
+    # Los atributos internos no se exponen a JavaScript (pywebview publica los públicos)
+    assert all(k.startswith("_") for k in vars(api))

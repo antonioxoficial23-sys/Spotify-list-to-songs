@@ -3,11 +3,11 @@
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
-datas = [("assets", "assets")]
+datas = [("assets", "assets"), ("listacd/web", "listacd/web")]
 binaries = [(str(p), "bin") for p in Path("bin").glob("*.exe")]
-hiddenimports = ["pythoncom", "pywintypes", "win32timezone", "win32com.client", "PIL._tkinter_finder"]
+hiddenimports = ["pythoncom", "pywintypes", "win32timezone", "win32com.client", "PIL._tkinter_finder", "clr", "win32clipboard"]
 
-for pkg in ("yt_dlp_ejs", "customtkinter"):
+for pkg in ("yt_dlp_ejs", "customtkinter", "webview"):
     d, b, h = collect_all(pkg)
     datas += d; binaries += b; hiddenimports += h
 datas += collect_data_files("ytmusicapi")

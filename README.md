@@ -5,7 +5,7 @@
 Pegas el enlace de una lista, eliges el tipo de CD y la app descarga las canciones, las prepara
 y graba los discos con tu grabadora. Si la lista no cabe en un CD, la reparte sola en varios.
 
-![Icono](assets/listacd.png)
+![ListaCD con una lista cargada y repartida en dos discos](docs/capturas/lista.png)
 
 ## Instalar (Windows)
 
@@ -98,10 +98,21 @@ python -m pytest                    # pruebas
 - `listacd/burner.py`: grabación con IMAPI2 de Windows.
 - `listacd/gui.py`: interfaz (CustomTkinter).
 
+### Diseño
+
+La interfaz es HTML/CSS dentro de una ventana nativa (pywebview + WebView2, que ya viene en
+Windows 10/11). Si WebView2 faltase, se abre automáticamente la ventana clásica.
+El concepto es el CD grabado de toda la vida: un CD-R plateado con el título a rotulador que se
+oscurece al prepararse y grabarse, y la lista de canciones como la carátula de papel de la caja.
+Plan completo en `docs/diseno.md`. Tipografías incluidas: Atkinson Hyperlegible Next (OFL) y
+Permanent Marker (Apache 2.0).
+
 ### Skills de Claude Code incluidas
 
 - `CLAUDE.md`: mapa corto del proyecto para que Claude no gaste tokens explorando.
 - `/probar-listacd`: pruebas + comprobación interna + capturas de la interfaz sin pantalla.
+- `/frontend-design`: la skill oficial de diseño de Anthropic (Apache 2.0) para evitar el aspecto
+  genérico de interfaz hecha con IA.
 - `/critica-listacd`: crítica estructurada (diseño, usabilidad, audio, coche, robustez, recursos)
   con tabla de hallazgos por gravedad. Flujo recomendado: `/critica-listacd` → aplicar mejoras →
   `/probar-listacd`. La primera crítica y su resolución están en `docs/critica-1.md`.

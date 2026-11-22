@@ -41,11 +41,13 @@ def selftest(out: str) -> int:
             assert r.returncode == 0, r.stderr
             g = gain_for(measure_loudness(src))
             w = to_cd_wav(src, Path(d) / "a.wav", g)
+            from . import downloader as dl0
+            wav_chain = dl0.LAST_FILTER
             m = to_mp3(src, Path(d) / "a.mp3", g)
             from . import downloader as dl
 
             return (f"{exe} · wav {wav_duration(w):.2f}s · mp3 {m.stat().st_size} B · "
-                    f"ganancia {g} dB · soxr {'sí' if dl._SOXR_OK else 'NO'}")
+                    f"ganancia {g} dB · WAV: {wav_chain} · MP3: {dl.LAST_FILTER}")
 
     check("Versión", lambda: __version__)
     check("ffmpeg", ffmpeg_test)

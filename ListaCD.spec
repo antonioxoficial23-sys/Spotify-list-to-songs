@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 datas = [("assets", "assets")]
 binaries = [(str(p), "bin") for p in Path("bin").glob("*.exe")]
-hiddenimports = ["pythoncom", "pywintypes", "win32com.client", "PIL._tkinter_finder"]
+hiddenimports = ["pythoncom", "pywintypes", "win32timezone", "win32com.client", "PIL._tkinter_finder"]
 
 for pkg in ("yt_dlp_ejs", "customtkinter"):
     d, b, h = collect_all(pkg)

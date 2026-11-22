@@ -118,40 +118,52 @@ def gain_for(loudness: tuple[float, float] | None) -> float:
 
 
 _SOXR_OK: bool | None = None
+LAST_FILTER = ""  # cadena de filtros que funcionó (para la comprobación interna)
 
 
-def _resampler(extra: str = "") -> str:
+def _soxr() -> bool:
     global _SOXR_OK
     if _SOXR_OK is None:
         r = run([ffmpeg(), "-hide_banner", "-h", "filter=aresample"])
         _SOXR_OK = "soxr" in r.stdout
-    base = "aresample=osr=44100"
-    if _SOXR_OK:
-        base += ":resampler=soxr:precision=28"
-    return base + extra
+    return _SOXR_OK
 
 
-def _convert(src: Path, dst: Path, gain_db: float, codec_args: list[str], resample: str) -> Path:
+def _filter_chains(gain_db: float, sample_fmt: str, dither: bool) -> list[str]:
+    """Cadenas de filtros de mejor a peor; se usa la primera que acepte este ffmpeg."""
+    vol = f"volume={gain_db}dB," if abs(gain_db) >= 0.05 else ""
+    fmt = f"aformat=sample_fmts={sample_fmt}:channel_layouts=stereo"
+    dith = ":dither_method=triangular" if dither else ""
+    chains = []
+    if _soxr():
+        chains.append(f"{vol}aresample=44100:resampler=soxr:precision=28{dith},{fmt}")
+    chains.append(f"{vol}aresample=44100{dith},{fmt}")
+    chains.append(f"{vol}aresample=44100,{fmt}")
+    return chains
+
+
+def _convert(src: Path, dst: Path, gain_db: float, codec_args: list[str],
+             sample_fmt: str, dither: bool) -> Path:
+    global LAST_FILTER
     tmp = dst.with_name(dst.stem + ".tmp" + dst.suffix)
-    filters = []
-    if abs(gain_db) >= 0.05:
-        filters.append(f"volume={gain_db}dB")
-    filters.append(resample)
-    cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
-           "-map", "0:a:0", "-vn", "-sn", "-map_metadata", "-1",
-           "-af", ",".join(filters), "-ac", "2", *codec_args, str(tmp)]
-    r = run(cmd)
-    if r.returncode != 0:
+    err = ""
+    for chain in _filter_chains(gain_db, sample_fmt, dither):
+        cmd = [ffmpeg(), "-hide_banner", "-loglevel", "error", "-y", "-i", str(src),
+               "-map", "0:a:0", "-vn", "-sn", "-map_metadata", "-1",
+               "-af", chain, *codec_args, str(tmp)]
+        r = run(cmd)
+        if r.returncode == 0 and tmp.exists() and tmp.stat().st_size > 1000:
+            LAST_FILTER = chain
+            tmp.replace(dst)
+            return dst
+        err = r.stderr.strip()
         tmp.unlink(missing_ok=True)
-        raise RuntimeError(f"ffmpeg falló: {r.stderr.strip()[-300:]}")
-    tmp.replace(dst)
-    return dst
+    raise RuntimeError(f"ffmpeg falló: {err[-600:]}")
 
 
 def to_cd_wav(src: Path, dst: Path, gain_db: float = 0.0) -> Path:
     """WAV PCM 16 bits / 44,1 kHz / estéreo: exactamente el formato de un CD de audio."""
-    return _convert(src, dst, gain_db, ["-c:a", "pcm_s16le", "-f", "wav"],
-                    _resampler(":osf=s16:dither_method=triangular"))
+    return _convert(src, dst, gain_db, ["-c:a", "pcm_s16le", "-f", "wav"], "s16", dither=True)
 
 
 def to_mp3(src: Path, dst: Path, gain_db: float = 0.0) -> Path:
@@ -161,8 +173,8 @@ def to_mp3(src: Path, dst: Path, gain_db: float = 0.0) -> Path:
     """
     return _convert(src, dst, gain_db,
                     ["-c:a", "libmp3lame", "-b:a", "320k", "-compression_level", "0",
-                     "-id3v2_version", "0"],
-                    _resampler())
+                     "-id3v2_version", "0", "-f", "mp3"],
+                    "s16p|fltp|s16", dither=False)
 
 
 def wav_duration(path: Path) -> float:

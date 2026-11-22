@@ -117,7 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         col = spotify.fetch(args.url, s.client_id, s.client_secret)
         if col.truncated:
-            print("[aviso] Solo se leyeron las primeras 100 canciones (faltan claves de Spotify).")
+            print("[aviso] Solo se leyeron las primeras 100 canciones. Para la lista entera, copia sus "
+                  "canciones en Spotify (Ctrl+A, Ctrl+C) y pásalas entre comillas en lugar del enlace.")
         total = len(col.tracks)
 
         def on_event(e):

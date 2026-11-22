@@ -41,15 +41,18 @@ por si quieres volver a grabarlos o copiarlos a un USB.
 
 ### Listas de más de 100 canciones
 
-Sin configurar nada, Spotify solo deja leer **las primeras 100 canciones** de una lista. Para
-listas más largas, pon tus claves de Spotify (gratis, 2 minutos) en **⚙ Ajustes**:
+Con el enlace de una lista, Spotify solo deja leer **las primeras 100 canciones**. Para pasarla
+entera, sin claves ni registros:
 
-1. Entra en <https://developer.spotify.com/dashboard> con tu cuenta y pulsa **Create app**.
-2. Nombre y descripción: lo que quieras. *Redirect URI*: `http://127.0.0.1:8888/callback`. Marca **Web API**.
-3. Copia el **Client ID** y el **Client secret** en Ajustes.
+1. Abre la lista en **Spotify para ordenador** (o en open.spotify.com).
+2. Pulsa en cualquier canción de la lista y después **Ctrl+A** (las selecciona todas) y **Ctrl+C**.
+3. En ListaCD pulsa **Pegar**. Se lee cada canción por separado; con listas grandes tarda
+   un poco (lo verás en el botón).
+4. Pulsa en el título de la lista para ponerle nombre: es el que se escribe en el disco y en la carpeta.
 
-Las listas que crea el propio Spotify (Descubrimiento semanal, Top Hits…) no se pueden leer con
-claves; la app usa la página pública (máx. 100). Truco: añade esas canciones a una lista tuya.
+Si además pones tus claves de Spotify en **Ajustes** (gratis, en
+<https://developer.spotify.com/dashboard> → *Create app* → marca *Web API*), los enlaces de lista
+se leen enteros y las canciones llevan también álbum y año en sus etiquetas.
 
 ## Calidad: qué hace exactamente
 

@@ -15,7 +15,7 @@
   <form class="link" id="link-form">
     <label class="sr" for="url">Enlace de la lista de Spotify</label>
     <input id="url" type="text" autocomplete="off" spellcheck="false"
-           placeholder="Pega el enlace de tu lista de Spotify">
+           placeholder="Pega el enlace de tu lista de Spotify o sus canciones copiadas">
     <button type="button" class="btn quiet" id="paste">Pegar</button>
     <button type="submit" class="btn primary" id="load">Cargar lista</button>
   </form>
@@ -86,9 +86,10 @@
     <label class="field"><span>Carpeta donde se guardan los discos</span>
       <span class="row"><input id="s-out" type="text"><button type="button" class="btn quiet" id="s-pick">Elegir</button></span>
     </label>
-    <h3>Listas de más de 100 canciones</h3>
-    <p class="hint">Spotify pide unas claves gratuitas. Entra en el panel de desarrolladores con tu cuenta,
-      crea una app con «Web API» marcado y copia aquí el Client ID y el Client secret.</p>
+    <h3>Claves de Spotify (opcional)</h3>
+    <p class="hint">No hacen falta: para listas largas basta con copiar sus canciones en Spotify
+      (Ctrl+A y Ctrl+C) y pulsar Pegar. Con claves, además, se leen el álbum y el año de cada canción
+      para las etiquetas. Se consiguen gratis creando una app con «Web API» en el panel de desarrolladores.</p>
     <button type="button" class="btn link" id="s-dash">Abrir el panel de desarrolladores de Spotify</button>
     <label class="field"><span>Client ID</span><input id="s-id" type="text" autocomplete="off"></label>
     <label class="field"><span>Client secret</span><input id="s-secret" type="password" autocomplete="off" placeholder="Sin cambios"></label>

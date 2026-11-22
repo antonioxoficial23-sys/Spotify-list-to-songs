@@ -447,7 +447,7 @@ class App(ctk.CTk):
         if not url:
             return
         try:
-            spotify.parse_url(url)
+            spotify.parse_input(url)
         except ValueError:
             messagebox.showwarning(APP_NAME, "Ese enlace no parece de Spotify.\n\n"
                                    "En Spotify: «…» de la lista → Compartir → Copiar enlace.")
@@ -482,8 +482,8 @@ class App(ctk.CTk):
         self.pl_meta.configure(text=meta)
         warn = col.warning
         if col.truncated:
-            warn = ("Solo se han podido leer las primeras 100 canciones. Para listas más largas "
-                    "añade tus claves de Spotify en ⚙ Ajustes (es gratis).")
+            warn = ("Solo se han podido leer las primeras 100 canciones. Para la lista entera: en Spotify "
+                    "abre la lista, pulsa en una canción, Ctrl+A, Ctrl+C, y aquí pulsa Pegar.")
         self.pl_warn.configure(text=warn)
         if cover:
             try:

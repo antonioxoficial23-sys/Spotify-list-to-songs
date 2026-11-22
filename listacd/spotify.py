@@ -1,10 +1,10 @@
 """Lectura de metadatos de listas, álbumes y canciones de Spotify.
 
-Dos métodos:
-  1. API oficial de Spotify (spotipy) si hay SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET.
-     Devuelve la lista completa con todos los metadatos (álbum, número de pista, año...).
-  2. Página "embed" pública de Spotify, sin credenciales. Sirve para salir del paso,
-     pero solo trae título, artistas y duración, y Spotify la limita a ~100 canciones.
+Formas de leer una lista:
+  1. API oficial de Spotify (spotipy) si hay claves: lista completa con todos los metadatos.
+  2. Página "embed" pública, sin claves: solo las primeras 100 canciones de una lista.
+  3. Enlaces de canciones pegados (en Spotify: Ctrl+A y Ctrl+C dentro de la lista): sin claves
+     y sin límite; se lee cada canción por separado.
 """
 
 from __future__ import annotations
@@ -19,6 +19,9 @@ URL_RE = re.compile(
     r"(?:open\.spotify\.com/(?:intl-[a-z]{2}/)?(?:embed/)?|spotify:)"
     r"(?P<kind>playlist|album|track)[/:](?P<id>[A-Za-z0-9]{22})"
 )
+
+TRACK_RE = re.compile(r"(?:open\.spotify\.com/(?:intl-[a-z]{2}/)?(?:embed/)?track/|spotify:track:)([A-Za-z0-9]{22})")
+PASTED_NAME = "Mi lista para el coche"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -71,8 +74,22 @@ def parse_url(url: str) -> tuple[str, str]:
     return m.group("kind"), m.group("id")
 
 
-def fetch(url: str, client_id: str = "", client_secret: str = "") -> Collection:
-    kind, sid = parse_url(url)
+def parse_input(text: str) -> tuple[str, str | list[str]]:
+    """Devuelve ("playlist"|"album"|"track", id) o ("tracks", [ids]) si se pegaron varias canciones."""
+    ids = list(dict.fromkeys(TRACK_RE.findall(text or "")))  # sin repetidas, en orden
+    if len(ids) > 1:
+        return "tracks", ids
+    return parse_url(text or "")
+
+
+def fetch(url: str, client_id: str = "", client_secret: str = "", progress=None) -> Collection:
+    """Lee una lista, álbum, canción o varias canciones pegadas.
+
+    progress(hechas, total) se llama al leer canciones pegadas, que puede tardar.
+    """
+    kind, sid = parse_input(url)
+    if kind == "tracks":
+        return fetch_tracks(sid, client_id, client_secret, progress)
     if client_id and client_secret:
         try:
             return _fetch_api(kind, sid, client_id, client_secret)
@@ -156,6 +173,83 @@ def _fetch_api(kind: str, sid: str, client_id: str, client_secret: str) -> Colle
             col.tracks.append(_track_from_api(t))
         page = sp.next(page) if page.get("next") else None
     return col
+
+
+# ------------------------------------------------------------- canciones pegadas
+
+
+def fetch_tracks(ids: list[str], client_id: str = "", client_secret: str = "", progress=None) -> Collection:
+    col = Collection(name=PASTED_NAME, kind="tracks")
+    found: dict[str, Track] = {}
+    if client_id and client_secret:
+        try:
+            found = _tracks_api(ids, client_id, client_secret, progress)
+        except Exception:
+            found = {}
+    missing = [i for i in ids if i not in found]
+    if missing:
+        found.update(_tracks_embed(missing, progress, done_before=len(ids) - len(missing), total=len(ids)))
+    col.tracks = [found[i] for i in ids if i in found]
+    lost = len(ids) - len(col.tracks)
+    if lost:
+        col.warning = (f"{lost} {'canción no se pudo' if lost == 1 else 'canciones no se pudieron'} leer de Spotify. "
+                       "Vuelve a pegarlas más tarde si las echas en falta.")
+    covers = [t.cover_url for t in col.tracks if t.cover_url]
+    col.cover_url = covers[0] if covers else ""
+    return col
+
+
+def _tracks_api(ids, client_id, client_secret, progress) -> dict[str, Track]:
+    import spotipy
+    from spotipy.cache_handler import MemoryCacheHandler
+    from spotipy.oauth2 import SpotifyClientCredentials
+
+    sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+        client_id=client_id, client_secret=client_secret, cache_handler=MemoryCacheHandler()),
+        retries=5, requests_timeout=20)
+    out = {}
+    for k in range(0, len(ids), 50):
+        for t in sp.tracks(ids[k:k + 50]).get("tracks", []):
+            if t and t.get("id"):
+                out[t["id"]] = _track_from_api(t)
+        if progress:
+            progress(min(k + 50, len(ids)), len(ids))
+    return out
+
+
+def _tracks_embed(ids, progress, done_before=0, total=0, workers=6) -> dict[str, Track]:
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    session = requests.Session()
+    session.headers.update({"User-Agent": USER_AGENT, "Accept-Language": "es-ES,es;q=0.9"})
+
+    def one(tid: str) -> Track | None:
+        for attempt in range(4):
+            try:
+                r = session.get(f"https://open.spotify.com/embed/track/{tid}", timeout=20)
+                if r.status_code == 429 or r.status_code >= 500:
+                    time.sleep(float(r.headers.get("Retry-After") or 2 ** attempt))
+                    continue
+                r.raise_for_status()
+                t = parse_embed_html(r.text, "track").tracks[0]
+                t.spotify_id = t.spotify_id or tid
+                return t
+            except (requests.RequestException, RuntimeError, KeyError, IndexError, ValueError):
+                time.sleep(2 ** attempt)
+        return None
+
+    out, done = {}, done_before
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(one, tid): tid for tid in ids}
+        for fut in as_completed(futures):
+            done += 1
+            t = fut.result()
+            if t:
+                out[futures[fut]] = t
+            if progress and (done % 5 == 0 or done == total):
+                progress(done, total or len(ids))
+    return out
 
 
 # ------------------------------------------------------------------------- embed

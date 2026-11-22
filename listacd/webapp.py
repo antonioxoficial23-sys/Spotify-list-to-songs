@@ -97,7 +97,7 @@ class Api:
     def load(self, url: str):
         url = (url or "").strip()
         try:
-            spotify.parse_url(url)
+            spotify.parse_input(url)
         except ValueError:
             return {"ok": False, "error": "Ese enlace no es de Spotify. En Spotify, pulsa ⋯ en la lista, "
                                           "después Compartir y Copiar enlace."}
@@ -105,13 +105,15 @@ class Api:
 
         def job():
             try:
-                col = spotify.fetch(url, s.client_id, s.client_secret)
+                col = spotify.fetch(url, s.client_id, s.client_secret,
+                                    progress=lambda d, t: self._emit("load_progress", done=d, total=t))
                 self._col, self._result = col, None
                 self._burned.clear()
                 warn = col.warning
                 if col.truncated:
-                    warn = ("Spotify solo deja leer las primeras 100 canciones sin claves. "
-                            "Añade tus claves gratuitas en Ajustes para leer la lista entera.")
+                    warn = ("Spotify solo deja leer las primeras 100 canciones con el enlace de la lista. "
+                            "Para pasarla entera: en Spotify para ordenador abre la lista, pulsa en una "
+                            "canción, después Ctrl+A y Ctrl+C, y vuelve aquí y pulsa Pegar.")
                 self._emit("loaded", collection={
                     "name": col.name, "owner": col.owner, "kind": col.kind, "cover": col.cover_url,
                     "warning": warn,
@@ -123,6 +125,13 @@ class Api:
 
         self._thread(job)
         return {"ok": True}
+
+    def rename(self, name: str):
+        name = " ".join((name or "").split())[:80]
+        if self._col and name and not self._busy:
+            self._col.name = name
+            self._result = None
+        return self._col.name if self._col else ""
 
     def plan(self, excluded: list[int]):
         if not self._col:

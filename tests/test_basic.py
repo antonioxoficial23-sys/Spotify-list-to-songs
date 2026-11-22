@@ -232,3 +232,25 @@ def test_webapp_bridge(fake_env, monkeypatch):
     assert api.init()["settings"]["mode"] == "audio"
     # Los atributos internos no se exponen a JavaScript (pywebview publica los públicos)
     assert all(k.startswith("_") for k in vars(api))
+
+
+def test_pasted_tracks(monkeypatch):
+    """Canciones copiadas de Spotify (Ctrl+A, Ctrl+C): sin claves y sin límite de 100."""
+    ids = [f"{i:022d}" for i in range(150)]
+    # Al pegar en un campo de una línea los saltos desaparecen: también debe funcionar
+    text = "".join(f"https://open.spotify.com/track/{i}" for i in ids) + "\nspotify:track:" + ids[0]
+    kind, got = spotify.parse_input(text)
+    assert kind == "tracks" and got == ids
+    assert spotify.parse_input("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")[0] == "playlist"
+
+    def fake_embed(missing, progress, done_before=0, total=0, workers=6):
+        if progress:
+            progress(total, total)
+        return {i: Track(title=f"T{i[-3:]}", artists=["A"], duration_ms=1000, spotify_id=i)
+                for i in missing if i != ids[7]}
+    monkeypatch.setattr(spotify, "_tracks_embed", fake_embed)
+    seen = []
+    col = spotify.fetch(text, progress=lambda d, t: seen.append((d, t)))
+    assert col.kind == "tracks" and len(col.tracks) == 149
+    assert [t.spotify_id for t in col.tracks[:3]] == ids[:3]
+    assert "1 canción no se pudo" in col.warning and seen[-1] == (150, 150)

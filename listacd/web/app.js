@@ -86,7 +86,11 @@ function renderTracks() {
     box.append(el("ol", { class: "empty-steps" },
       el("li", {}, el("span", {}, "En Spotify, abre tu lista y pulsa ", el("b", {}, "⋯"), ".")),
       el("li", {}, el("span", {}, "Elige ", el("b", {}, "Compartir"), " y después ", el("b", {}, "Copiar enlace"), ".")),
-      el("li", {}, el("span", {}, "Vuelve aquí y pulsa ", el("b", {}, "Pegar"), "."))));
+      el("li", {}, el("span", {}, "Vuelve aquí y pulsa ", el("b", {}, "Pegar"), "."))),
+      el("p", { class: "empty-note" }, el("b", {}, "¿Más de 100 canciones? "),
+        "En Spotify para ordenador, abre la lista, pulsa en una canción y después ",
+        el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "A"), " y ", el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "C"),
+        ". Vuelve aquí y pulsa ", el("b", {}, "Pegar"), ": se leerán todas, una a una."));
     return;
   }
   const groups = S.discs.map((d) => ({ title: "Disco", n: d.number, items: d.items, seconds: d.seconds }));
@@ -223,10 +227,14 @@ function onEvent(e) {
       S.col = e.collection; S.excluded.clear(); S.status = {}; S.errors = {}; S.prepared = false; S.burned.clear();
       $("load").disabled = false; $("load").textContent = "Cargar lista";
       $("list-name").textContent = S.col.name;
+      $("list-name").contentEditable = "plaintext-only";
+      $("list-name").title = "Pulsa para cambiar el nombre (es el que se escribe en el disco)";
       $("list-meta").textContent = [S.col.owner, `${S.col.tracks.length} canciones, ${longDur(S.col.tracks.reduce((a, t) => a + t.seconds, 0))}`].filter(Boolean).join(", ");
       $("list-warn").hidden = !S.col.warning; $("list-warn").textContent = S.col.warning || "";
       $("cover").hidden = !S.col.cover; if (S.col.cover) $("cover").src = S.col.cover;
       setStatus(""); replan(); break;
+    case "load_progress":
+      $("load").textContent = `Leyendo ${e.done} de ${e.total}…`; break;
     case "load_error":
       $("load").disabled = false; $("load").textContent = "Cargar lista"; tell("No se pudo cargar", e.message); break;
     case "track":
@@ -298,6 +306,13 @@ async function start() {
   }));
   $("normalize").addEventListener("change", async () => { S.normalize = $("normalize").checked; S.prepared = false; await S.api.set_options(S.mode, S.normalize); render(); });
   $("prepare").addEventListener("click", prepare);
+  const nameEl = $("list-name");
+  nameEl.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); nameEl.blur(); } });
+  nameEl.addEventListener("blur", async () => {
+    if (!S.col) return;
+    const name = await S.api.rename(nameEl.textContent);
+    if (name) { S.col.name = name; nameEl.textContent = name; S.prepared = false; render(); }
+  });
   $("change").addEventListener("click", () => { if (S.busy) return; S.prepared = false; S.burned.clear(); setStatus(""); render(); });
   $("cancel").addEventListener("click", () => { S.api.cancel(); setStatus("Cancelando: se terminan las canciones en curso…"); });
   $("open-folder").addEventListener("click", () => S.api.open_folder());

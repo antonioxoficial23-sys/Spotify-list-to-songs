@@ -31,7 +31,7 @@
     load: async () => ({ ok: true }), start: async () => true, cancel: async () => {}, drives: async () => [{ id: "1", name: "E: ASUS SDRW-08U9M-U" }],
     check_disc: async () => ({ ok: true, message: "CD-R virgen en E:." }), burn: async () => true,
     cache_info: async () => ({ bytes: 812e6 }), clear_cache: async () => ({ ok: true, bytes: 0 }),
-    save_settings: async () => ({}), paste: async () => "", open_url: async () => {}, open_folder: async () => {}, choose_folder: async () => null,
+    save_settings: async () => ({}), rename: async (n) => n.trim(), paste: async () => "", open_url: async () => {}, open_folder: async () => {}, choose_folder: async () => null,
   } };
   window.LISTACD_DEMO = async (emit, S, render) => {
     if (state === "ajustes") { setTimeout(() => document.getElementById("open-settings").click(), 100); return; }

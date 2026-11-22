@@ -13,7 +13,7 @@ from typing import Callable
 from . import cd, spotify
 from .config import Settings, cache_dir
 from .downloader import (
-    car_friendly_cover, download_original, ffmpeg, fetch_image, gain_for, measure_loudness,
+    DownloadFailed, car_friendly_cover, download_original, ffmpeg, fetch_image, gain_for, measure_loudness,
     safe_name, tag_mp3, tag_wav, to_cd_wav, to_mp3, wav_duration,
 )
 from .matcher import Match, Matcher
@@ -129,11 +129,26 @@ def run_job(
         if m is None:
             m = matcher.find(t)
             if m is None:
-                raise LookupError("No se encontró en YouTube Music")
+                raise LookupError("No está en YouTube Music. Quítala o busca otra versión en Spotify.")
             matches.put(track_key(t), m.__dict__)
 
         step(DOWNLOADING)
-        original = download_original(m, cache, settings.cookies_browser)
+        try:
+            original = download_original(m, cache, settings.cookies_browser)
+        except DownloadFailed as first:
+            # Otra versión de la misma canción (p. ej. la del vídeo oficial) suele descargarse bien
+            for alt in [c for c in matcher.ranked(t) if c.video_id != m.video_id][:3]:
+                if cancel.is_set():
+                    raise Cancelled()
+                try:
+                    original = download_original(alt, cache, settings.cookies_browser)
+                    m = alt
+                    matches.put(track_key(t), m.__dict__)
+                    break
+                except DownloadFailed:
+                    continue
+            else:
+                raise first
 
         step(CONVERTING)
         gain = 0.0

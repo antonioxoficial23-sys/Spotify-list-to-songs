@@ -122,6 +122,18 @@ class Matcher:
             )
         return out
 
+    def ranked(self, track: Track, limit: int = 4) -> list[Match]:
+        """Todas las versiones aceptables, de mejor a peor (para cuando la primera no se descarga)."""
+        query = f"{track.artists[0] if track.artists else ''} {track.title}".strip()
+        seen: dict[str, Match] = {}
+        for flt, bonus in (("songs", 0.0), ("videos", -0.05)):
+            for c in self._ytm_candidates(query, flt):
+                c.score = score(track, c.title, c.artists, c.duration_s) + bonus
+                if c.video_id not in seen or c.score > seen[c.video_id].score:
+                    seen[c.video_id] = c
+        good = [c for c in seen.values() if c.score >= self.MIN_SCORE]
+        return sorted(good, key=lambda c: c.score, reverse=True)[:limit]
+
     def find(self, track: Track) -> Match | None:
         best: Match | None = None
 

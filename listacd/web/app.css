@@ -49,7 +49,8 @@ button, input, select { font: inherit; color: inherit; }
 .btn.primary:hover:not(:disabled) { background: var(--rotulador-hondo); }
 .btn.primary:disabled { background: #BFC6CE; color: #6B737D; cursor: default; }
 .btn.quiet { background: transparent; border: 1px solid #A9B1BA; color: var(--tinta); }
-.btn.quiet:hover { background: rgba(255,255,255,.5); }
+.btn.quiet:hover:not(:disabled) { background: rgba(255,255,255,.5); }
+.btn.quiet:disabled { opacity: .45; cursor: default; }
 .btn.link { align-self: flex-start; background: none; height: auto; padding: 4px 0; color: var(--rotulador); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .btn.big { height: 52px; font-size: var(--t-18); width: 100%; }
 
@@ -196,3 +197,5 @@ dialog::backdrop { background: rgba(31,39,51,.45); }
 kbd { font: inherit; font-weight: 700; color: var(--tinta); padding: 1px 6px; border: 1px solid #B8C0C8; border-bottom-width: 2px; border-radius: 5px; background: #fff; }
 #list-name[contenteditable] { cursor: text; border-radius: 4px; outline-offset: 4px; }
 #list-name[contenteditable]:hover { box-shadow: 0 2px 0 #B8C0C8; }
+.retry { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: #F6E9E7; color: var(--error); font-weight: 650; }
+.btn.link.inline { display: inline; padding: 0; }

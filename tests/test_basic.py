@@ -112,6 +112,9 @@ def fake_env(tmp_path, monkeypatch):
                 return None
             return Match(f"vid{t.spotify_id}", t.title, t.artists, 2, 1.0, thumbnail="http://x/t")
 
+        def ranked(self, t):
+            return [Match(f"alt{t.spotify_id}", t.title, t.artists, 2, 0.9)]
+
     from PIL import Image
     import io
     buf = io.BytesIO()
@@ -254,3 +257,68 @@ def test_pasted_tracks(monkeypatch):
     assert col.kind == "tracks" and len(col.tracks) == 149
     assert [t.spotify_id for t in col.tracks[:3]] == ids[:3]
     assert "1 canción no se pudo" in col.warning and seen[-1] == (150, 150)
+
+
+def test_download_retries_other_clients(tmp_path, monkeypatch):
+    """Un 403 con el cliente por defecto se resuelve probando otros clientes de YouTube."""
+    import yt_dlp
+    tried = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download):
+            clients = self.opts.get("extractor_args", {}).get("youtube", {}).get("player_client")
+            tried.append(clients)
+            if len(tried) < 3:
+                (tmp_path / "abc.webm.part").write_bytes(b"x")
+                raise yt_dlp.utils.DownloadError("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+            (tmp_path / "abc.webm").write_bytes(b"audio")
+            return {"id": "abc", "ext": "webm"}
+
+        def prepare_filename(self, info):
+            return str(tmp_path / "abc.webm")
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
+    p = downloader.download_original(Match("abc", "T", ["A"], 1, 1), tmp_path)
+    assert p.name == "abc.webm" and tried == [None, ["tv"], ["web_safari"]]
+    assert not list(tmp_path.glob("*.part"))
+
+
+def test_download_403_message(tmp_path, monkeypatch):
+    import yt_dlp
+
+    class AlwaysFail:
+        def __init__(self, opts): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def extract_info(self, url, download):
+            raise yt_dlp.utils.DownloadError("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", AlwaysFail)
+    with pytest.raises(downloader.DownloadFailed, match="403"):
+        downloader.download_original(Match("zzz", "T", ["A"], 1, 1), tmp_path)
+
+
+def test_pipeline_uses_alternative_when_download_fails(fake_env, monkeypatch):
+    col, s, FakeMatcher = fake_env
+    real = core.download_original
+
+    def flaky(m, cache, cookies):
+        if m.video_id == "vida1":  # la primera versión de «Canción Uno» está bloqueada
+            raise downloader.DownloadFailed("YouTube bloqueó la descarga (error 403).")
+        return real(m, cache, cookies)
+    monkeypatch.setattr(core, "download_original", flaky)
+    res = core.run_job(col, s, matcher=FakeMatcher(), include={1})
+    assert not res.failed and len(res.discs[0].items) == 1
+    from listacd.config import cache_dir
+    import json
+    saved = json.loads((cache_dir() / "coincidencias.json").read_text())
+    assert saved["a1"]["video_id"] == "alta1"  # la próxima vez va directa a la que funciona

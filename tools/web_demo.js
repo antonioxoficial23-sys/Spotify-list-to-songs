@@ -28,7 +28,7 @@
   window.pywebview = { api: {
     init: async () => ({ version: "demo", canBurn: true, settings: { mode, normalize: true, outputDir: "C:\\Users\\Antonio\\Music\\ListaCD", clientId: "", hasSecret: false, cookies: "", workers: 4 } }),
     poll: async () => [], plan: async (ex) => plan(ex), set_options: async (m) => { mode = m; return true; },
-    load: async () => ({ ok: true }), start: async () => true, cancel: async () => {}, drives: async () => [{ id: "1", name: "E: ASUS SDRW-08U9M-U" }],
+    load: async () => ({ ok: true }), start: async () => true, cancel: async () => {}, drives: async () => (state === "sin-grabadora" ? [] : [{ id: "1", name: "E: ASUS SDRW-08U9M-U" }]),
     check_disc: async () => ({ ok: true, message: "CD-R virgen en E:." }), burn: async () => true,
     cache_info: async () => ({ bytes: 812e6 }), clear_cache: async () => ({ ok: true, bytes: 0 }),
     save_settings: async () => ({}), rename: async (n) => n.trim(), paste: async () => "", open_url: async () => {}, open_folder: async () => {}, choose_folder: async () => null,
@@ -48,10 +48,10 @@
       emit({ type: "track", index: 17, status: "Buscando" });
       emit({ type: "progress", done: 13, total: 36 });
     }
-    if (state === "lista" || state === "grabando") {
+    if (state === "lista" || state === "grabando" || state === "sin-grabadora") {
       const discs = plan([...S.excluded, 4]);
       tracks.forEach((_, k) => { if (!S.excluded.has(k + 1) && k + 1 !== 4) emit({ type: "track", index: k + 1, status: "Lista" }); });
-      emit({ type: "job_done", cancelled: false, folder: "", discs, failed: [{ index: 4, reason: "No está en YouTube Music." }] });
+      emit({ type: "job_done", cancelled: false, folder: "", discs, failed: [{ index: 4, reason: "YouTube bloqueó la descarga (error 403). Pulsa «Reintentar»; si sigue fallando, en Ajustes elige el navegador con el que entras en YouTube." }] });
       S.burned.add(1); render();
       if (state === "grabando") { S.busy = S.burning = true; S.selectedDisc = 2; render(); emit({ type: "burn_progress", disc: 2, text: "Grabando la pista 7 de 17…", frac: 0.38 }); }
     }

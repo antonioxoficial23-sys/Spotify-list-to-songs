@@ -55,42 +55,93 @@ def safe_name(name: str, max_len: int = 150, ascii_cd: bool = False) -> str:
 # ----------------------------------------------------------------------- descarga
 
 
+class DownloadFailed(RuntimeError):
+    """YouTube no dejó descargar el audio con ningún cliente."""
+
+
+# Si YouTube responde 403 con un cliente, a menudo funciona con otro. None = los de yt-dlp.
+CLIENT_ATTEMPTS: list[list[str] | None] = [
+    None, ["tv"], ["web_safari"], ["android_vr"], ["mweb"], ["tv_simply"], ["ios"],
+]
+
+
+def _clean_partial(cache: Path, video_id: str) -> None:
+    for p in cache.glob(f"{video_id}.*"):
+        if p.suffix in (".part", ".ytdl") or p.name.endswith((".part", ".ytdl")) or p.stat().st_size == 0:
+            p.unlink(missing_ok=True)
+
+
+def explain_download_error(text: str) -> str:
+    """Traduce los errores de yt-dlp a algo que el usuario pueda entender y resolver."""
+    t = text.lower()
+    if "403" in t or "forbidden" in t:
+        return ("YouTube bloqueó la descarga (error 403). Pulsa «Reintentar»; si sigue fallando, "
+                "en Ajustes elige el navegador con el que entras en YouTube.")
+    if "sign in" in t or "bot" in t or "confirm" in t:
+        return "YouTube pide verificar que no eres un robot. En Ajustes elige el navegador con el que entras en YouTube."
+    if "age" in t and "restrict" in t:
+        return "El vídeo tiene restricción de edad. En Ajustes elige el navegador con el que entras en YouTube."
+    if "unavailable" in t or "private" in t or "removed" in t:
+        return "El vídeo ya no está disponible en YouTube."
+    if "timed out" in t or "connection" in t or "network" in t or "resolve" in t:
+        return "Se cortó la conexión a internet. Pulsa «Reintentar»."
+    return "No se pudo descargar de YouTube. Pulsa «Reintentar»."
+
+
 def download_original(match: Match, cache: Path, cookies_browser: str = "") -> Path:
-    """Descarga el mejor audio disponible tal cual (sin recodificar) a la caché."""
+    """Descarga el mejor audio disponible tal cual (sin recodificar) a la caché.
+
+    Si YouTube rechaza la descarga, lo vuelve a intentar con otros clientes de YouTube.
+    """
     for p in cache.glob(f"{match.video_id}.*"):
         if p.suffix not in (".part", ".ytdl") and p.stat().st_size > 0:
             return p
 
     import yt_dlp
 
-    opts = {
-        # 141 = AAC 256 kbps (solo con YouTube Premium y cookies). Si no, el mejor audio
-        # disponible (normalmente Opus ~160 kbps) evitando las versiones "drc" comprimidas.
-        "format": "141/bestaudio[format_id!*=drc]/bestaudio/best",
+    base = {
         "outtmpl": str(cache / "%(id)s.%(ext)s"),
         "quiet": True,
         "no_warnings": True,
         "noprogress": True,
         "noplaylist": True,
-        "retries": 10,
-        "fragment_retries": 10,
+        "retries": 5,
+        "fragment_retries": 5,
         "ffmpeg_location": ffmpeg(),
     }
     deno = find_binary("deno")
     if deno:
-        opts["js_runtimes"] = {"deno": {"path": deno}}
+        base["js_runtimes"] = {"deno": {"path": deno}}
     if cookies_browser:
-        opts["cookiesfrombrowser"] = (cookies_browser,)
+        base["cookiesfrombrowser"] = (cookies_browser,)
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(match.url, download=True)
-        path = Path(ydl.prepare_filename(info))
-    if not path.exists():
-        found = [p for p in cache.glob(f"{match.video_id}.*") if p.suffix not in (".part", ".ytdl")]
-        if not found:
-            raise RuntimeError("yt-dlp no generó ningún archivo de audio")
-        path = found[0]
-    return path
+    last = ""
+    for n, clients in enumerate(CLIENT_ATTEMPTS):
+        opts = dict(base)
+        # 141 = AAC 256 kbps (solo con YouTube Premium y cookies). Si no, el mejor audio
+        # (normalmente Opus ~160 kbps) evitando las versiones "drc" comprimidas.
+        opts["format"] = ("141/bestaudio[format_id!*=drc]/bestaudio/best" if n == 0
+                          else "bestaudio[format_id!*=drc]/bestaudio/best")
+        if clients:
+            opts["extractor_args"] = {"youtube": {"player_client": clients}}
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(match.url, download=True)
+                path = Path(ydl.prepare_filename(info))
+            if path.exists() and path.stat().st_size > 0:
+                return path
+            found = [p for p in cache.glob(f"{match.video_id}.*")
+                     if p.suffix not in (".part", ".ytdl") and p.stat().st_size > 0]
+            if found:
+                return found[0]
+            last = "yt-dlp no generó ningún archivo de audio"
+        except yt_dlp.utils.DownloadError as exc:
+            last = str(exc)
+            low = last.lower()
+            if "unavailable" in low or "private video" in low or "removed" in low:
+                break  # no se arregla cambiando de cliente
+        _clean_partial(cache, match.video_id)
+    raise DownloadFailed(explain_download_error(last))
 
 
 # --------------------------------------------------------------------------- audio

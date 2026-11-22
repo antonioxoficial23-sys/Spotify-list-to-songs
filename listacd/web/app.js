@@ -3,12 +3,12 @@
 
 const $ = (id) => document.getElementById(id);
 const S = {
-  api: null, mode: "audio", normalize: true, canBurn: false,
+  api: null, mode: "audio", normalize: true, canBurn: false, drives: [], failed: [],
   col: null, excluded: new Set(), status: {}, errors: {},
   discs: [], prepared: false, burned: new Set(), busy: false, burning: false,
   selectedDisc: 1, t0: 0, done: 0, total: 0,
 };
-const STATUS_TEXT = { Buscando: "Buscando", Descargando: "Descargando", Convirtiendo: "Convirtiendo", Lista: "Lista", Error: "No encontrada" };
+const STATUS_TEXT = { Buscando: "Buscando", Descargando: "Descargando", Convirtiendo: "Convirtiendo", Lista: "Lista", Error: "Falló" };
 const MODE_HINT = {
   audio: "Calidad CD, sin pasar por MP3. Suena en cualquier radio con CD. Unas 18 canciones por disco.",
   mp3: "MP3 a 320 kbps, unas 70 canciones por disco. Solo si tu radio pone «MP3» en el frontal.",
@@ -166,6 +166,18 @@ function renderBurn() {
   box.hidden = !S.prepared || !S.discs.length;
   if (box.hidden) return;
   const list = $("burn-list"); list.replaceChildren();
+  const noDrive = S.canBurn && !S.drives.length;
+  $("drive").closest(".field").hidden = !S.canBurn || noDrive;
+  if (noDrive) {
+    list.append(el("p", { class: "hint" }, "No se encuentra ninguna grabadora. Conéctala y pulsa ",
+      el("button", { class: "btn link inline", onclick: loadDrives }, "Buscar de nuevo"), "."));
+  }
+  if (S.failed.length && !S.busy) {
+    const n = S.failed.length;
+    list.append(el("div", { class: "retry" },
+      el("span", {}, n === 1 ? "Falta una canción." : `Faltan ${n} canciones.`),
+      el("button", { class: "btn quiet", onclick: prepare }, n === 1 ? "Reintentar" : `Reintentar las ${n}`)));
+  }
   if (!S.canBurn) {
     list.append(el("p", { class: "hint" }, "Desde aquí solo se puede grabar en Windows. Graba la carpeta de cada disco con tu programa de grabación."));
   }
@@ -174,17 +186,17 @@ function renderBurn() {
     list.append(el("div", { class: "burn-item" + (done ? " done" : "") },
       el("div", {}, el("strong", {}, done ? `Disco ${d.number} grabado` : `Disco ${d.number}`),
         el("small", {}, `${d.items.length} canciones, ${minutes(d.seconds)}`)),
-      el("button", { class: "btn " + (done ? "quiet" : "primary"), disabled: !S.canBurn || S.busy || null,
+      el("button", { class: "btn " + (done ? "quiet" : "primary"), disabled: !S.canBurn || noDrive || S.busy || null,
         onclick: () => burn(d.number) }, done ? "Grabar otra copia" : `Grabar disco ${d.number}`)));
   }
 }
 
 async function loadDrives() {
-  if (!S.canBurn) { $("drive").closest(".field").hidden = true; return; }
-  const drives = await S.api.drives();
+  if (!S.canBurn) return renderBurn();
+  S.drives = await S.api.drives();
   const sel = $("drive"); sel.replaceChildren();
-  if (!drives.length) sel.append(el("option", { value: "" }, "No se encuentra ninguna grabadora"));
-  for (const d of drives) sel.append(el("option", { value: d.id }, d.name));
+  for (const d of S.drives) sel.append(el("option", { value: d.id }, d.name));
+  renderBurn();
 }
 
 // ------------------------------------------------------------------ acciones
@@ -198,7 +210,7 @@ async function load(ev) {
 }
 async function prepare() {
   if (!(await S.api.start([...S.excluded]))) return;
-  S.busy = true; S.prepared = false; S.status = {}; S.errors = {}; S.burned.clear();
+  S.busy = true; S.prepared = false; S.status = {}; S.errors = {}; S.failed = []; S.burned.clear();
   S.t0 = Date.now(); S.done = 0; S.total = S.col.tracks.length - S.excluded.size;
   setStatus("Buscando las canciones…");
   render();
@@ -249,9 +261,10 @@ function onEvent(e) {
       S.busy = false;
       if (e.cancelled) { setStatus("Preparación cancelada."); render(); break; }
       S.discs = e.discs; S.prepared = true; S.selectedDisc = 1;
+      S.failed = e.failed.map((f) => f.index);
       for (const f of e.failed) S.errors[f.index] = f.reason;
       setStatus(!e.failed.length ? "Discos listos para grabar."
-        : e.failed.length === 1 ? "Discos listos. Una canción no se encontró." : `Discos listos. ${e.failed.length} canciones no se encontraron.`,
+        : e.failed.length === 1 ? "Discos listos, pero falta una canción." : `Discos listos, pero faltan ${e.failed.length} canciones.`,
         e.failed.length ? "" : "good");
       render(); loadDrives(); break;
     case "job_error":

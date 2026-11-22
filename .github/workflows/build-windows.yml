@@ -1,0 +1,83 @@
+name: Compilar ListaCD para Windows
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: pip install -r requirements.txt pywin32 pyinstaller
+
+      - name: Descargar ffmpeg y deno
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bin, tmp | Out-Null
+          Invoke-WebRequest https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip -OutFile tmp/ffmpeg.zip
+          Expand-Archive tmp/ffmpeg.zip tmp/ffmpeg
+          Get-ChildItem tmp/ffmpeg -Recurse -Include ffmpeg.exe, ffprobe.exe | Copy-Item -Destination bin
+          Invoke-WebRequest https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip -OutFile tmp/deno.zip
+          Expand-Archive tmp/deno.zip bin -Force
+          Get-ChildItem bin
+
+      - name: Crear el ejecutable
+        run: pyinstaller --noconfirm ListaCD.spec
+
+      - name: Comprobación interna del .exe (ffmpeg, IMAPI2, librerías)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/ListaCD/ListaCD.exe -ArgumentList "--selftest", "$PWD/selftest.txt" -Wait -PassThru
+          Get-Content selftest.txt
+          if ($p.ExitCode -ne 0) { throw "Selftest falló ($($p.ExitCode))" }
+
+      - name: Crear el instalador
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path listacd/__init__.py -Pattern '__version__ = "(.+)"').Matches[0].Groups[1].Value
+          "VERSION=$ver" >> $env:GITHUB_ENV
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+            $env:PATH += ";C:\Program Files (x86)\Inno Setup 6"
+          }
+          iscc /DMyAppVersion=$ver installer/ListaCD.iss
+          Compress-Archive dist/ListaCD/* "dist/ListaCD-$ver-portable.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ListaCD-Windows
+          path: |
+            dist/ListaCD-Setup-*.exe
+            dist/ListaCD-*-portable.zip
+
+      - name: Publicar versión
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ListaCD-Setup-*.exe
+            dist/ListaCD-*-portable.zip

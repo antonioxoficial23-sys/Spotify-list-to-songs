@@ -179,6 +179,16 @@ def burn_audio(
         _eject(rec)
 
 
+def iso_volume_name(name: str) -> str:
+    """Nombre de volumen válido para IMAPI2: máx. 15 caracteres; en ISO 9660 solo A–Z, 0–9 y _."""
+    import re
+    import unicodedata
+
+    plain = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode().upper()
+    plain = re.sub(r"[^A-Z0-9]+", "_", plain).strip("_")
+    return plain[:15].rstrip("_") or "LISTACD"
+
+
 def build_data_image(client, folder: Path, volume_name: str, rec=None):
     fsi = client.Dispatch("IMAPI2FS.MsftFileSystemImage")
     if rec is not None:
@@ -186,7 +196,7 @@ def build_data_image(client, folder: Path, volume_name: str, rec=None):
     else:
         fsi.ChooseImageDefaultsForMediaType(2)  # CD-R
     fsi.FileSystemsToCreate = FS_ISO9660 | FS_JOLIET
-    fsi.VolumeName = volume_name[:16]
+    fsi.VolumeName = iso_volume_name(volume_name)
     fsi.Root.AddTree(str(folder), False)
     return fsi.CreateResultImage()
 
@@ -245,7 +255,7 @@ def self_test() -> str:
         d = Path(d)
         (d / "datos").mkdir()
         (d / "datos" / "01 - Prueba - Canción.mp3").write_bytes(b"\x00" * 5000)
-        img = build_data_image(client, d / "datos", "ListaCD prueba")
+        img = build_data_image(client, d / "datos", "Viaje a la playa (Disco 1) ñ")
         out.append(f"Imagen ISO/Joliet OK: {img.TotalBlocks} bloques")
         wav = d / "t.wav"
         with wave.open(str(wav), "wb") as w:

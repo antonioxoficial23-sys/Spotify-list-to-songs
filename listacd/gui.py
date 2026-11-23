@@ -172,8 +172,10 @@ class App(ctk.CTk):
         self.burning = False
 
         self.title(f"{APP_NAME} {__version__} — Listas de Spotify a CD")
-        self.geometry("1180x760")
-        self.minsize(980, 640)
+        # Que quepa en pantallas pequeñas (p. ej. 1920×1080 al 150 %)
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{max(900, min(1180, sw - 40))}x{max(580, min(760, sh - 80))}")
+        self.minsize(900, 580)
         self.configure(fg_color=BG)
         self._set_icon()
 

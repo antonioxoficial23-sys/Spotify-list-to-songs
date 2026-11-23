@@ -119,6 +119,11 @@ Permanent Marker (Apache 2.0).
   [awesome-design-skills](https://github.com/bergside/awesome-design-skills) (MIT). No se incluyen
   sus 67 estilos: comparten plantilla genérica y cargarían el contexto de cada sesión; si quieres
   probar uno, `npx typeui.sh pull <nombre>`.
+- `/bug-prospector` y `/bug-echo` (Apache 2.0, de Terryc21): auditoría de fallos ocultos con 7 «lentes»
+  y, tras cada arreglo, búsqueda de otras apariciones del mismo patrón. Primer informe en
+  `.agents/research/2026-11-23-bug-prospector-listacd.md`.
+- `/prompter` y `/tutorial-creator` (Apache 2.0, de Terryc21): reescribe tus peticiones a Claude si
+  son ambiguas (pide confirmación antes de seguir) y crea tutoriales comentados del propio código.
 - `/frontend-design`: la skill oficial de diseño de Anthropic (Apache 2.0) para evitar el aspecto
   genérico de interfaz hecha con IA.
 - `/critica-listacd`: crítica estructurada (diseño, usabilidad, audio, coche, robustez, recursos)

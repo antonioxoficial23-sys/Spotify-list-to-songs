@@ -341,7 +341,7 @@ def test_retry_reuses_converted_songs(fake_env, monkeypatch):
         second = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
         assert conversions == [] and downloads == []
         assert sorted(p.name for p in second.discs[0].folder.iterdir()) == names
-        assert not (first.folder / ".nuevo").exists() and not (first.folder / ".trabajo").exists()
+        assert not list(first.folder.glob(".nuevo*")) and not (first.folder / ".trabajo").exists()
         # Quitar una canción y volver a preparar: la otra sigue sin convertirse de nuevo
         third = core.run_job(col, s, matcher=FakeMatcher(), include={2})
         assert conversions == [] and [it.index for it in third.discs[0].items] == [2]
@@ -351,3 +351,129 @@ def test_retry_reuses_converted_songs(fake_env, monkeypatch):
         monkeypatch.setattr(core, "download_original",
                             lambda m, cache, cookies: _fake_original(cache, m.video_id, 440))
         monkeypatch.setattr(core, "fetch_image", lambda url: None)
+
+
+def test_iso_volume_name():
+    """IMAPI2: como mucho 15 caracteres y, en ISO 9660, solo A–Z, 0–9 y _."""
+    import re
+    from listacd.burner import iso_volume_name
+    for name, want in [("Viaje a la playa", "VIAJE_A_LA_PLAY"), ("ASTROWORLD", "ASTROWORLD"),
+                       ("Canción de verano ñ", "CANCION_DE_VERA"), ("🚗🎶", "LISTACD"), ("a-b", "A_B")]:
+        got = iso_volume_name(name)
+        assert got == want and len(got) <= 15 and re.fullmatch(r"[A-Z0-9_]+", got)
+
+
+def test_open_file_in_old_disc_is_reported_without_losing_work(fake_env, monkeypatch):
+    """Windows no deja renombrar una carpeta con un archivo abierto: aviso claro y nada se pierde."""
+    col, s, FakeMatcher = fake_env
+    first = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
+    disc1 = first.discs[0].folder
+    before = sorted(p.name for p in disc1.iterdir())
+    real_rename = Path.rename
+
+    def locked(self, target):
+        if self.name == "Disco 1" and self.parent == first.folder:
+            raise PermissionError(32, "El proceso no tiene acceso al archivo porque está siendo utilizado")
+        return real_rename(self, target)
+    monkeypatch.setattr(Path, "rename", locked)
+    with pytest.raises(core.FolderBusy, match="Disco 1"):
+        core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
+    assert sorted(p.name for p in disc1.iterdir()) == before  # intacto
+    monkeypatch.setattr(Path, "rename", real_rename)
+    again = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})  # al cerrar el archivo, funciona
+    assert sorted(p.name for p in again.discs[0].folder.iterdir()) == before
+    assert not list(first.folder.glob(".viejo*")) and not list(first.folder.glob(".nuevo*"))
+
+
+def test_same_video_is_downloaded_once(fake_env, monkeypatch):
+    import threading
+    import time as _t
+    col, s, FakeMatcher = fake_env
+    col.tracks[1].title = col.tracks[0].title  # dos canciones, el mismo vídeo
+
+    class SameVideo(FakeMatcher):
+        def find(self, t):
+            return Match("vidcomun", t.title, t.artists, 2, 1.0)
+
+    active, peak = [0], [0]
+    lock = threading.Lock()
+
+    def slow(m, cache, cookies):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        _t.sleep(0.2)
+        try:
+            return _fake_original(cache, m.video_id, 440)
+        finally:
+            with lock:
+                active[0] -= 1
+    monkeypatch.setattr(core, "download_original", slow)
+    res = core.run_job(col, s, matcher=SameVideo(), include={1, 2})
+    assert peak[0] == 1 and not res.failed and len(res.discs[0].items) == 2
+
+
+def test_track_longer_than_a_cd(fake_env):
+    col, s, FakeMatcher = fake_env
+    s.mode = "audio"
+    col.tracks[0].duration_ms = 95 * 60 * 1000
+    res = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
+    assert [i for i, _, _ in res.failed] == [1] and "CD MP3" in res.failed[0][2]
+    s.mode = "mp3"  # en MP3 sí cabe (la duración real del archivo de prueba es de 2 s)
+    assert not core.run_job(col, s, matcher=FakeMatcher(), include={1, 2}).failed
+
+
+def test_score_without_artist():
+    t = Track(title="Canción", artists=[], duration_ms=200000)
+    assert score(t, "Canción", ["Alguien"], 200) > 0.55
+
+
+def test_cache_write_failure_is_not_fatal(tmp_path, monkeypatch):
+    c = core.JsonCache(tmp_path / "c.json")
+    monkeypatch.setattr(Path, "replace", lambda self, target: (_ for _ in ()).throw(PermissionError(13, "bloqueado")))
+    c.put("k", 1)  # no lanza
+    assert c.get("k") == 1
+
+
+def test_bridge_claim_and_rename(fake_env, monkeypatch):
+    import threading
+    from listacd import webapp
+    col, s, FakeMatcher = fake_env
+    monkeypatch.setattr(webapp.Settings, "load", classmethod(lambda cls: s))
+    api = webapp.Api()
+    api._col = col
+    # Varios clics simultáneos: solo uno consigue el trabajo
+    wins = []
+    threads = [threading.Thread(target=lambda: wins.append(api._claim())) for _ in range(20)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert wins.count(True) == 1
+    api._busy = False
+    api._result = object()
+    assert api.rename("  " + col.name + " ") == {"name": col.name, "changed": False}
+    assert api._result is not None  # sin cambios no se descarta lo preparado
+    assert api.rename("Otro nombre") == {"name": "Otro nombre", "changed": True} and api._result is None
+
+
+def test_window_size_fits_small_screens():
+    from types import SimpleNamespace as NS
+    from listacd.webapp import window_size
+    assert window_size([NS(width=2560, height=1440)]) == (1200, 800)
+    assert window_size([NS(width=1280, height=720)]) == (1200, 640)
+    assert window_size([NS(width=1024, height=600)]) == (984, 600)
+    assert window_size([]) == (1200, 800)
+
+
+def test_pasted_lists_get_distinct_names():
+    from listacd.spotify import pasted_name
+    assert pasted_name().startswith("Mi lista del ")
+
+
+def test_leftover_locked_temp_folders_do_not_block(fake_env):
+    """Restos de una ejecución anterior que no se pudieron borrar no impiden preparar."""
+    col, s, FakeMatcher = fake_env
+    first = core.run_job(col, s, matcher=FakeMatcher(), include={1})
+    for name in (".viejo", ".nuevo", ".viejo-viejo"):
+        (first.folder / name / "Disco 1").mkdir(parents=True)  # como si estuvieran bloqueados
+    again = core.run_job(col, s, matcher=FakeMatcher(), include={1})
+    assert not again.failed and again.discs[0].folder.exists()

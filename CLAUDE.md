@@ -20,10 +20,16 @@ Interfaz y mensajes al usuario en español.
 - Comprobación interna: `python -m listacd --selftest salida.txt`.
 - Captura de la interfaz: `node tools/captura_web.js lista /tmp/x.png` (ver skill `probar-listacd`).
 
+## Skills útiles
+- `bug-prospector` (auditoría con 7 lentes, informes en `.agents/research/`) y, tras cada arreglo, `bug-echo`.
+- `critica-listacd` (producto), `diseno-listacd` + `frontend-design` (diseño), `probar-listacd` (verificar).
+
 ## Reglas
 - No hay red a Spotify/YouTube en el sandbox: prueba con dobles (ver `tests/`).
 - Nunca recodificar dos veces con pérdida: siempre desde el original en caché.
 - Lo ya convertido se reutiliza (`.convertidas.json` por carpeta, clave vídeo|modo|ganancia).
 - Atributos internos de `webapp.Api` con `_` (pywebview expone a JS todo lo público).
+- «Ocupado» se marca con `Api._claim()` (cerrojo): pywebview atiende cada llamada en su propio hilo.
+- Nombre de volumen de CD de datos: `burner.iso_volume_name()` (≤ 15, A–Z 0–9 _).
 - Todo lo de COM/IMAPI2 en el hilo que lo crea; la GUI solo se toca desde el hilo principal (cola `events`).
 - Tras cambiar algo de Windows, verificar el job `windows` de GitHub Actions (hace el selftest del .exe).

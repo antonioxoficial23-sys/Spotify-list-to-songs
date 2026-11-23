@@ -157,6 +157,7 @@ function render() {
   $("summary-text").textContent = `${S.mode === "audio" ? "CD de audio" : "CD MP3"}${S.normalize ? ", volumen igualado" : ""}`;
   $("change").disabled = S.busy;
   $("load").disabled = S.busy;
+  if (S.col) $("list-name").contentEditable = S.busy ? "false" : "plaintext-only";
   renderBurn();
 }
 function setStatus(html, cls = "") { $("status").replaceChildren(cls ? el("span", { class: cls }, html) : html); }
@@ -239,7 +240,7 @@ function onEvent(e) {
       S.col = e.collection; S.excluded.clear(); S.status = {}; S.errors = {}; S.prepared = false; S.burned.clear();
       $("load").disabled = false; $("load").textContent = "Cargar lista";
       $("list-name").textContent = S.col.name;
-      $("list-name").contentEditable = "plaintext-only";
+      $("list-name").contentEditable = "plaintext-only";  // se bloquea mientras se trabaja (render)
       $("list-name").title = "Pulsa para cambiar el nombre (es el que se escribe en el disco)";
       $("list-meta").textContent = [S.col.owner, `${S.col.tracks.length} canciones, ${longDur(S.col.tracks.reduce((a, t) => a + t.seconds, 0))}`].filter(Boolean).join(", ");
       $("list-warn").hidden = !S.col.warning; $("list-warn").textContent = S.col.warning || "";
@@ -323,8 +324,9 @@ async function start() {
   nameEl.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); nameEl.blur(); } });
   nameEl.addEventListener("blur", async () => {
     if (!S.col) return;
-    const name = await S.api.rename(nameEl.textContent);
-    if (name) { S.col.name = name; nameEl.textContent = name; S.prepared = false; render(); }
+    const r = await S.api.rename(nameEl.textContent);
+    nameEl.textContent = r.name || S.col.name;
+    if (r.changed) { S.col.name = r.name; S.prepared = false; S.burned.clear(); render(); }
   });
   $("change").addEventListener("click", () => { if (S.busy) return; S.prepared = false; S.burned.clear(); setStatus(""); render(); });
   $("cancel").addEventListener("click", () => { S.api.cancel(); setStatus("Cancelando: se terminan las canciones en curso…"); });

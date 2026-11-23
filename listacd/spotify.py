@@ -21,7 +21,11 @@ URL_RE = re.compile(
 )
 
 TRACK_RE = re.compile(r"(?:open\.spotify\.com/(?:intl-[a-z]{2}/)?(?:embed/)?track/|spotify:track:)([A-Za-z0-9]{22})")
-PASTED_NAME = "Mi lista para el coche"
+def pasted_name() -> str:
+    """Nombre por defecto de una lista pegada. Con fecha y hora para que cada una tenga su carpeta."""
+    from datetime import datetime
+
+    return datetime.now().strftime("Mi lista del %d-%m-%Y, %H.%M")
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -179,7 +183,7 @@ def _fetch_api(kind: str, sid: str, client_id: str, client_secret: str) -> Colle
 
 
 def fetch_tracks(ids: list[str], client_id: str = "", client_secret: str = "", progress=None) -> Collection:
-    col = Collection(name=PASTED_NAME, kind="tracks")
+    col = Collection(name=pasted_name(), kind="tracks")
     found: dict[str, Track] = {}
     if client_id and client_secret:
         try:

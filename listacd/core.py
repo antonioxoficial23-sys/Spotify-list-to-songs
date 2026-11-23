@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,10 @@ class Cancelled(Exception):
     pass
 
 
+class FolderBusy(RuntimeError):
+    """Una carpeta de disco anterior no se puede sustituir porque hay archivos abiertos."""
+
+
 class JsonCache:
     """Pequeña caché persistente en JSON, segura entre hilos."""
 
@@ -64,9 +69,12 @@ class JsonCache:
     def put(self, key: str, value) -> None:
         with self.lock:
             self.data[key] = value
-            tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(self.path)
+            try:
+                tmp = self.path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
+                tmp.replace(self.path)
+            except OSError:
+                pass  # p. ej. el antivirus tiene el archivo abierto: se sigue sin guardar la caché
 
 
 def track_key(t: spotify.Track) -> str:
@@ -127,7 +135,7 @@ def run_job(
     folder.mkdir(parents=True, exist_ok=True)
     work = folder / ".trabajo"
     shutil.rmtree(work, ignore_errors=True)
-    work.mkdir()
+    work.mkdir(exist_ok=True)
 
     cache = cache_dir()
     matches = JsonCache(cache / "coincidencias.json")
@@ -140,6 +148,16 @@ def run_job(
     claim_lock = threading.Lock()
     # La red admite muchas descargas a la vez; ffmpeg usa un núcleo por conversión
     cpu = threading.Semaphore(max(2, os.cpu_count() or 2))
+    video_locks: dict[str, threading.Lock] = {}
+
+    def video_lock(video_id: str) -> threading.Lock:
+        with claim_lock:
+            return video_locks.setdefault(video_id, threading.Lock())
+
+    def download(match: Match) -> Path:
+        # Dos canciones de la lista pueden apuntar al mismo vídeo: se descarga una sola vez
+        with video_lock(match.video_id):
+            return download_original(match, cache, settings.cookies_browser)
     items: dict[int, cd.Item] = {}
     result = JobResult(folder=folder, mode=mode)
     selected = [(i, t) for i, t in enumerate(col.tracks, 1) if include is None or i in include]
@@ -151,6 +169,9 @@ def run_job(
                 raise Cancelled()
             on_event(Event("track", index=idx, status=status))
 
+        if mode == "audio" and t.duration_s > cd.AUDIO_CD_SECONDS:
+            raise ValueError(f"Dura {cd.fmt_time(t.duration_s)} y no cabe en un CD de audio (80 min). "
+                             "Quítala o usa el modo CD MP3.")
         step(SEARCHING)
         cached = matches.get(track_key(t))
         m = Match(**cached) if cached else None
@@ -182,14 +203,14 @@ def run_job(
 
         step(DOWNLOADING)
         try:
-            original = download_original(m, cache, settings.cookies_browser)
+            original = download(m)
         except DownloadFailed as first:
             # Otra versión de la misma canción (p. ej. la del vídeo oficial) suele descargarse bien
             for alt in [c for c in matcher.ranked(t) if c.video_id != m.video_id][:3]:
                 if cancel.is_set():
                     raise Cancelled()
                 try:
-                    original = download_original(alt, cache, settings.cookies_browser)
+                    original = download(alt)
                     m = alt
                     matches.put(track_key(t), m.__dict__)
                     break
@@ -212,6 +233,10 @@ def run_job(
             if mode == "audio":
                 out = to_cd_wav(original, work / f"{idx:04d}.wav", gain)
                 seconds = wav_duration(out)
+                if seconds > cd.AUDIO_CD_SECONDS:
+                    out.unlink(missing_ok=True)
+                    raise ValueError(f"La versión de YouTube dura {cd.fmt_time(seconds)} y no cabe en un CD "
+                                     "de audio. Quítala o usa el modo CD MP3.")
             else:
                 out = to_mp3(original, work / f"{idx:04d}.mp3", gain)
         if mode == "mp3":
@@ -248,10 +273,40 @@ def run_job(
         log("Cancelado.")
         return result
 
-    # ---- Reparto en discos. Se monta en .nuevo (moviendo también los archivos reutilizados
-    # de los discos anteriores) y solo al final se sustituyen las carpetas viejas.
-    staging = folder / ".nuevo"
-    shutil.rmtree(staging, ignore_errors=True)
+    # ---- Reparto en discos.
+    # 1) Se apartan las carpetas «Disco N» anteriores a .viejo. En Windows renombrar falla si hay
+    #    algún archivo abierto: en ese caso se deshace y se avisa sin haber tocado nada.
+    # Nombres nuevos en cada ejecución: si quedaron restos bloqueados de otra, no estorban.
+    for stale in list(folder.glob(".viejo-*")) + list(folder.glob(".nuevo-*")):
+        shutil.rmtree(stale, ignore_errors=True)
+    run_id = f"{os.getpid()}-{threading.get_ident()}-{int(time.time() * 1000)}"
+    old_dir = folder / f".viejo-{run_id}"
+    old_dir.mkdir()
+    moved: list[str] = []
+    for old in sorted(p for p in folder.glob("Disco *") if p.is_dir()):
+        try:
+            old.rename(old_dir / old.name)
+            moved.append(old.name)
+        except OSError:
+            for name in moved:
+                try:
+                    (old_dir / name).rename(folder / name)
+                except OSError:
+                    pass
+            shutil.rmtree(work, ignore_errors=True)
+            raise FolderBusy(f"No se puede actualizar «{old.name}» porque hay un archivo suyo abierto "
+                             "(¿en un reproductor o en el Explorador?). Ciérralo y pulsa «Reintentar»; "
+                             "las canciones ya preparadas no se pierden.")
+    for it in items.values():  # los reutilizados ahora están dentro de .viejo
+        try:
+            rel = it.path.relative_to(folder)
+        except ValueError:
+            continue
+        if rel.parts and rel.parts[0].startswith("Disco "):
+            it.path = old_dir / rel
+
+    # 2) Se montan los discos nuevos en .nuevo y se ponen en su sitio.
+    staging = folder / f".nuevo-{run_id}"
     staging.mkdir()
     (folder / "canciones_no_encontradas.txt").unlink(missing_ok=True)
 
@@ -277,9 +332,6 @@ def run_job(
         if mode == "audio":
             disc.cue = cd.write_cue(disc, album, disc.folder / f"Disco {disc.number}.cue")
 
-    for old in folder.glob("Disco *"):
-        if old.is_dir():
-            shutil.rmtree(old, ignore_errors=True)
     for disc in result.discs:
         final = folder / f"Disco {disc.number}"
         disc.folder.rename(final)
@@ -290,6 +342,7 @@ def run_job(
             disc.cue = final / disc.cue.name
     shutil.rmtree(staging, ignore_errors=True)
     shutil.rmtree(work, ignore_errors=True)
+    shutil.rmtree(old_dir, ignore_errors=True)  # lo que no se reutilizó
     (folder / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     if result.failed:

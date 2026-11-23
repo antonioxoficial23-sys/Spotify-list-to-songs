@@ -31,6 +31,7 @@ class Api:
         self._result: JobResult | None = None
         self._events: deque = deque()
         self._lock = threading.Lock()
+        self._busy_lock = threading.Lock()  # pywebview atiende cada llamada en su propio hilo
         self._cancel = threading.Event()
         self._busy = False
         self._burning = False
@@ -127,11 +128,15 @@ class Api:
         return {"ok": True}
 
     def rename(self, name: str):
+        """Cambia el nombre de la lista. Devuelve {name, changed}; solo descarta lo preparado si cambia."""
+        if not self._col:
+            return {"name": "", "changed": False}
         name = " ".join((name or "").split())[:80]
-        if self._col and name and not self._busy:
-            self._col.name = name
-            self._result = None
-        return self._col.name if self._col else ""
+        if not name or name == self._col.name or self._busy:
+            return {"name": self._col.name, "changed": False}
+        self._col.name = name
+        self._result = None
+        return {"name": name, "changed": True}
 
     def plan(self, excluded: list[int]):
         if not self._col:
@@ -141,10 +146,17 @@ class Api:
         return [_disc_dict(d) for d in cd.estimate(pairs, self._settings.mode)]
 
     # ---------------------------------------------------------------- preparar
+    def _claim(self) -> bool:
+        """Marca la app como ocupada si no lo estaba. Evita que un doble clic lance dos trabajos."""
+        with self._busy_lock:
+            if self._busy:
+                return False
+            self._busy = True
+            return True
+
     def start(self, excluded: list[int]):
-        if self._busy or not self._col:
+        if not self._col or not self._claim():
             return False
-        self._busy = True
         self._cancel.clear()
         self._result = None
         self._burned.clear()
@@ -218,9 +230,9 @@ class Api:
 
     def burn(self, number: int, drive_id: str):
         disc, drive = self._disc(number), self._drive(drive_id)
-        if not disc or not drive or self._busy:
+        if not disc or not drive or not self._claim():
             return False
-        self._busy = self._burning = True
+        self._burning = True
         audio = self._result.mode == "audio"
         name = self._col.name if self._col else APP_NAME
 
@@ -291,13 +303,28 @@ class Api:
         return True
 
 
+def window_size(screens=None) -> tuple[int, int]:
+    """1200×800, o menos si la pantalla es pequeña (p. ej. 1920×1080 al 150 % ≈ 1280×720)."""
+    try:
+        if screens is None:
+            import webview
+
+            screens = webview.screens
+        scr = screens[0]
+        sw, sh = int(scr.width), int(scr.height)
+    except Exception:
+        return 1200, 800
+    return max(960, min(1200, sw - 40)), max(600, min(800, sh - 80))  # margen para la barra de tareas
+
+
 def run_web() -> None:
     import webview
 
     api = Api()
+    width, height = window_size()
     window = webview.create_window(
-        APP_NAME, str(WEB_DIR / "index.html"), js_api=api, width=1200, height=800,
-        min_size=(1024, 700), background_color="#DADFE3", text_select=False)
+        APP_NAME, str(WEB_DIR / "index.html"), js_api=api, width=width, height=height,
+        min_size=(960, 600), background_color="#DADFE3", text_select=False)
     api._window = window
     window.events.closing += api._on_closing
     icon = resource_dir() / "assets" / "listacd.ico"

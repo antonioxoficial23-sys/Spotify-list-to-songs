@@ -59,7 +59,7 @@ def score(track: Track, title: str, artists: list[str], duration_s: float) -> fl
     joined = " ".join(artists)
     a_score = max([_sim(a, joined) for a in track.artists] + [_sim(track.artist, joined)])
     # El artista a veces sale en el título del vídeo ("Artista - Canción")
-    if a_score < 0.6 and normalize(track.artists[0]) in normalize(title):
+    if a_score < 0.6 and track.artists and normalize(track.artists[0]) in normalize(title):
         a_score = 0.8
 
     s = 0.5 * t_score + 0.3 * a_score

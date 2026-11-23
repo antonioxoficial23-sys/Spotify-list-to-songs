@@ -114,6 +114,11 @@ Permanent Marker (Apache 2.0).
 
 - `CLAUDE.md`: mapa corto del proyecto para que Claude no gaste tokens explorando.
 - `/probar-listacd`: pruebas + comprobación interna + capturas de la interfaz sin pantalla.
+- `/diseno-listacd`: el sistema de diseño de ListaCD (colores, tipografía, estados de cada control,
+  accesibilidad WCAG 2.2 AA y lista de control), con el formato de
+  [awesome-design-skills](https://github.com/bergside/awesome-design-skills) (MIT). No se incluyen
+  sus 67 estilos: comparten plantilla genérica y cargarían el contexto de cada sesión; si quieres
+  probar uno, `npx typeui.sh pull <nombre>`.
 - `/frontend-design`: la skill oficial de diseño de Anthropic (Apache 2.0) para evitar el aspecto
   genérico de interfaz hecha con IA.
 - `/critica-listacd`: crítica estructurada (diseño, usabilidad, audio, coche, robustez, recursos)

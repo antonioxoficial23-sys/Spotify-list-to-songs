@@ -104,7 +104,8 @@ class Settings:
     mode: str = "audio"  # "audio" (CD de audio) | "mp3" (CD de MP3)
     normalize: bool = True
     cookies_browser: str = ""  # "", "firefox", "chrome", "edge"…
-    workers: int = 4
+    workers: int = 6  # canciones descargándose a la vez (la conversión usa los núcleos del PC)
+    version: int = 0  # formato del archivo de ajustes
 
     @classmethod
     def path(cls) -> Path:
@@ -123,6 +124,10 @@ class Settings:
         s.client_id = s.client_id or os.environ.get("SPOTIFY_CLIENT_ID", "")
         s.client_secret = s.client_secret or os.environ.get("SPOTIFY_CLIENT_SECRET", "")
         s.output_dir = s.output_dir or default_output_dir()
+        if s.version < 2:  # ajustes de versiones antiguas: 4 era el valor por defecto
+            if s.workers == 4:
+                s.workers = 6
+            s.version = 2
         return s
 
     def save(self) -> None:

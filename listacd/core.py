@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -72,6 +73,27 @@ def track_key(t: spotify.Track) -> str:
     return t.spotify_id or f"{t.artist}|{t.title}|{int(t.duration_s)}".lower()
 
 
+MANIFEST = ".convertidas.json"
+
+
+def _out_key(video_id: str, mode: str, gain: float) -> str:
+    """Identifica un archivo ya convertido: misma fuente, mismo formato y mismo volumen."""
+    return f"{video_id}|{mode}|{gain:.2f}"
+
+
+def _load_reusable(folder: Path) -> dict[str, Path]:
+    try:
+        data = json.loads((folder / MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for key, rel in data.items():
+        p = folder / rel
+        if p.is_file() and p.stat().st_size > 0:
+            out[key] = p
+    return out
+
+
 def output_folder(col: spotify.Collection, settings: Settings) -> Path:
     sub = "CD Audio" if settings.mode == "audio" else "CD MP3"
     return Path(settings.output_dir).expanduser() / safe_name(col.name, 80) / sub
@@ -112,6 +134,12 @@ def run_job(
     loudness = JsonCache(cache / "volumen.json")
     matcher = matcher or Matcher()
     covers: dict[int, bytes | None] = {}
+    keys: dict[int, str] = {}
+    reusable = _load_reusable(folder)
+    claimed: set[str] = set()
+    claim_lock = threading.Lock()
+    # La red admite muchas descargas a la vez; ffmpeg usa un núcleo por conversión
+    cpu = threading.Semaphore(max(2, os.cpu_count() or 2))
     items: dict[int, cd.Item] = {}
     result = JobResult(folder=folder, mode=mode)
     selected = [(i, t) for i, t in enumerate(col.tracks, 1) if include is None or i in include]
@@ -132,6 +160,26 @@ def run_job(
                 raise LookupError("No está en YouTube Music. Quítala o busca otra versión en Spotify.")
             matches.put(track_key(t), m.__dict__)
 
+        def gain_of(loud) -> float:
+            return gain_for(tuple(loud) if loud else None) if settings.normalize else 0.0
+
+        # ¿Ya se convirtió en una ejecución anterior (p. ej. antes de «Reintentar»)? Se reutiliza.
+        known = loudness.get(m.video_id)
+        if not settings.normalize or known is not None:
+            key = _out_key(m.video_id, mode, gain_of(known))
+            with claim_lock:
+                old = reusable.get(key) if key not in claimed else None
+                if old is not None:
+                    claimed.add(key)
+            if old is not None:
+                keys[idx] = key
+                if mode == "audio":
+                    seconds = wav_duration(old)
+                else:
+                    covers[idx] = car_friendly_cover(fetch_image(t.cover_url or m.thumbnail))
+                    seconds = t.duration_s or m.duration_s
+                return cd.Item(idx, seconds, old.stat().st_size, old, t.title, t.artist)
+
         step(DOWNLOADING)
         try:
             original = download_original(m, cache, settings.cookies_browser)
@@ -151,19 +199,22 @@ def run_job(
                 raise first
 
         step(CONVERTING)
-        gain = 0.0
-        if settings.normalize:
-            loud = loudness.get(m.video_id)
-            if loud is None:
+        with cpu:
+            if cancel.is_set():
+                raise Cancelled()
+            loud = loudness.get(m.video_id) if settings.normalize else None
+            if settings.normalize and loud is None:
                 loud = measure_loudness(original)
                 if loud is not None:
                     loudness.put(m.video_id, list(loud))
-            gain = gain_for(tuple(loud) if loud else None)
-        if mode == "audio":
-            out = to_cd_wav(original, work / f"{idx:04d}.wav", gain)
-            seconds = wav_duration(out)
-        else:
-            out = to_mp3(original, work / f"{idx:04d}.mp3", gain)
+            gain = gain_of(loud)
+            keys[idx] = _out_key(m.video_id, mode, gain)
+            if mode == "audio":
+                out = to_cd_wav(original, work / f"{idx:04d}.wav", gain)
+                seconds = wav_duration(out)
+            else:
+                out = to_mp3(original, work / f"{idx:04d}.mp3", gain)
+        if mode == "mp3":
             covers[idx] = car_friendly_cover(fetch_image(t.cover_url or m.thumbnail))
             seconds = t.duration_s or m.duration_s
         return cd.Item(idx, seconds, out.stat().st_size, out, t.title, t.artist)
@@ -197,16 +248,18 @@ def run_job(
         log("Cancelado.")
         return result
 
-    # ---- Reparto en discos y carpetas finales
-    for old in folder.glob("Disco *"):
-        if old.is_dir():
-            shutil.rmtree(old, ignore_errors=True)
+    # ---- Reparto en discos. Se monta en .nuevo (moviendo también los archivos reutilizados
+    # de los discos anteriores) y solo al final se sustituyen las carpetas viejas.
+    staging = folder / ".nuevo"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir()
     (folder / "canciones_no_encontradas.txt").unlink(missing_ok=True)
 
     ordered = [items[i] for i in sorted(items)]
     result.discs = cd.plan(ordered, mode)
+    manifest: dict[str, str] = {}
     for disc in result.discs:
-        disc.folder = folder / f"Disco {disc.number}"
+        disc.folder = staging / f"Disco {disc.number}"
         disc.folder.mkdir()
         album = col.name if len(result.discs) == 1 else f"{col.name} (Disco {disc.number})"
         for n, it in enumerate(disc.items, 1):
@@ -214,6 +267,8 @@ def run_job(
             dst = disc.folder / (_file_stem(n, t, mode) + it.path.suffix)
             shutil.move(str(it.path), dst)
             it.path = dst
+            if it.index in keys:
+                manifest[keys[it.index]] = f"Disco {disc.number}/{dst.name}"
             if mode == "audio":
                 tag_wav(dst, t, n, album)
             else:
@@ -221,7 +276,21 @@ def run_job(
                 it.size = dst.stat().st_size
         if mode == "audio":
             disc.cue = cd.write_cue(disc, album, disc.folder / f"Disco {disc.number}.cue")
+
+    for old in folder.glob("Disco *"):
+        if old.is_dir():
+            shutil.rmtree(old, ignore_errors=True)
+    for disc in result.discs:
+        final = folder / f"Disco {disc.number}"
+        disc.folder.rename(final)
+        disc.folder = final
+        for it in disc.items:
+            it.path = final / it.path.name
+        if disc.cue:
+            disc.cue = final / disc.cue.name
+    shutil.rmtree(staging, ignore_errors=True)
     shutil.rmtree(work, ignore_errors=True)
+    (folder / MANIFEST).write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
 
     if result.failed:
         (folder / "canciones_no_encontradas.txt").write_text(

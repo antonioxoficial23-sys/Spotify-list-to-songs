@@ -322,3 +322,32 @@ def test_pipeline_uses_alternative_when_download_fails(fake_env, monkeypatch):
     import json
     saved = json.loads((cache_dir() / "coincidencias.json").read_text())
     assert saved["a1"]["video_id"] == "alta1"  # la próxima vez va directa a la que funciona
+
+
+def test_retry_reuses_converted_songs(fake_env, monkeypatch):
+    """«Reintentar» solo procesa las que faltaban: las ya convertidas se reutilizan."""
+    col, s, FakeMatcher = fake_env
+    for mode in ("audio", "mp3"):
+        s.mode = mode
+        first = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
+        names = sorted(p.name for p in first.discs[0].folder.iterdir())
+        conversions = []
+        real_wav, real_mp3 = core.to_cd_wav, core.to_mp3
+        monkeypatch.setattr(core, "to_cd_wav", lambda *a: conversions.append(a) or real_wav(*a))
+        monkeypatch.setattr(core, "to_mp3", lambda *a: conversions.append(a) or real_mp3(*a))
+        downloads = []
+        real_dl = core.download_original
+        monkeypatch.setattr(core, "download_original", lambda *a: downloads.append(a) or real_dl(*a))
+        second = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
+        assert conversions == [] and downloads == []
+        assert sorted(p.name for p in second.discs[0].folder.iterdir()) == names
+        assert not (first.folder / ".nuevo").exists() and not (first.folder / ".trabajo").exists()
+        # Quitar una canción y volver a preparar: la otra sigue sin convertirse de nuevo
+        third = core.run_job(col, s, matcher=FakeMatcher(), include={2})
+        assert conversions == [] and [it.index for it in third.discs[0].items] == [2]
+        assert third.discs[0].items[0].path.name.startswith("01 - ")
+        monkeypatch.undo()
+        monkeypatch.setenv("LISTACD_CACHE", str(Path(first.folder).parents[2] / "cache"))
+        monkeypatch.setattr(core, "download_original",
+                            lambda m, cache, cookies: _fake_original(cache, m.video_id, 440))
+        monkeypatch.setattr(core, "fetch_image", lambda url: None)

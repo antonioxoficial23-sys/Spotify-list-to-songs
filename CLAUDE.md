@@ -11,7 +11,8 @@ Interfaz y mensajes al usuario en español.
 - `listacd/cd.py` reparto en discos y `.cue`. `listacd/burner.py` grabación IMAPI2 (solo Windows).
 - `listacd/web/` interfaz principal (HTML/CSS/JS) y `listacd/webapp.py` su puente (`Api`, eventos con `poll()`).
 - `listacd/gui.py` ventana clásica de reserva (si falta WebView2). `listacd/cli.py` entrada (+ `--selftest`).
-- Diseño: `docs/diseno.md` (tokens y concepto). Para cambios visuales, usa la skill `frontend-design`.
+- Diseño: `docs/diseno.md` (concepto). Para cambios visuales usa la skill `diseno-listacd`
+  (tokens, estados, WCAG 2.2 AA y lista de control) y, para ideas nuevas, `frontend-design`.
 - Build: `ListaCD.spec`, `installer/ListaCD.iss`, `.github/workflows/build-windows.yml`.
 
 ## Comandos
@@ -22,6 +23,7 @@ Interfaz y mensajes al usuario en español.
 ## Reglas
 - No hay red a Spotify/YouTube en el sandbox: prueba con dobles (ver `tests/`).
 - Nunca recodificar dos veces con pérdida: siempre desde el original en caché.
+- Lo ya convertido se reutiliza (`.convertidas.json` por carpeta, clave vídeo|modo|ganancia).
 - Atributos internos de `webapp.Api` con `_` (pywebview expone a JS todo lo público).
 - Todo lo de COM/IMAPI2 en el hilo que lo crea; la GUI solo se toca desde el hilo principal (cola `events`).
 - Tras cambiar algo de Windows, verificar el job `windows` de GitHub Actions (hace el selftest del .exe).

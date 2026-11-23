@@ -107,6 +107,8 @@ def download_original(match: Match, cache: Path, cookies_browser: str = "") -> P
         "noplaylist": True,
         "retries": 5,
         "fragment_retries": 5,
+        # Pedir el audio en trozos evita que YouTube frene la descarga a velocidad de reproducción
+        "http_chunk_size": 10 * 1024 * 1024,
         "ffmpeg_location": ffmpeg(),
     }
     deno = find_binary("deno")

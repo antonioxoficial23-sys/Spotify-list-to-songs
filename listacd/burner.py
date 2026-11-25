@@ -26,6 +26,7 @@ MEDIA_NAMES = {
     17: "BD-ROM", 18: "BD-R", 19: "BD-RE",
 }
 CD_WRITABLE = {2, 3}
+REWRITABLE = {3, 5, 7, 10, 13, 19}  # CD-RW, DVD-RAM, DVD+RW, DVD-RW, DVD+RW DL, BD-RE
 
 
 class BurnError(RuntimeError):
@@ -51,6 +52,7 @@ class MediaInfo:
     free_seconds: float = 0.0
     free_bytes: int = 0
     message: str = ""
+    rewritable: bool = False  # CD-RW: se puede borrar y volver a grabar
 
 
 def available() -> bool:
@@ -107,7 +109,17 @@ def media_info(drive: Drive) -> MediaInfo:
             return MediaInfo(False, message="Esta unidad no puede grabar.")
         data.Recorder = rec
         if not data.IsCurrentMediaSupported(rec):
-            return MediaInfo(False, message="No hay disco o no es grabable.")
+            # Un CD-RW ya grabado y cerrado no admite más datos, pero sí borrarse
+            try:
+                er = client.Dispatch("IMAPI2.MsftDiscFormat2Erase")
+                er.Recorder = rec
+                if er.IsCurrentMediaSupported(rec):
+                    return MediaInfo(True, kind="CD-RW", blank=False, writable_cd=True, rewritable=True,
+                                     message="El CD-RW ya tiene música.")
+            except pythoncom.com_error:
+                pass
+            return MediaInfo(False, message="No hay disco, o el que hay ya está grabado y cerrado. "
+                                            "Mete un CD-R virgen.")
         kind = int(data.CurrentPhysicalMediaType)
         blank = bool(data.MediaHeuristicallyBlank)
         free_sectors = int(data.FreeSectorsOnMedia)
@@ -116,13 +128,28 @@ def media_info(drive: Drive) -> MediaInfo:
     info = MediaInfo(
         present=True, kind=MEDIA_NAMES.get(kind, "Disco"), blank=blank,
         writable_cd=kind in CD_WRITABLE, free_bytes=free_sectors * 2048,
-        free_seconds=free_sectors / 75.0,
+        free_seconds=free_sectors / 75.0, rewritable=kind in REWRITABLE,
     )
     if not blank:
         info.message = "El disco no está vacío."
     elif kind not in CD_WRITABLE:
         info.message = f"Hay un {info.kind}; para el coche usa un CD-R."
     return info
+
+
+def erase(drive: Drive, progress: Callable[[str, float], None] = lambda text, frac: None) -> None:
+    """Borrado rápido de un CD-RW (deja el disco virgen para volver a grabarlo)."""
+    pythoncom, client = _com()
+    rec = _recorder(client, drive.unique_id)
+    er = client.Dispatch("IMAPI2.MsftDiscFormat2Erase")
+    er.Recorder = rec
+    er.ClientName = "ListaCD"
+    er.FullErase = False
+    progress("Borrando el CD-RW…", 0.02)
+    try:
+        er.EraseMedia()
+    except pythoncom.com_error as exc:
+        raise BurnError(f"No se pudo borrar el CD-RW: {_com_msg(exc)}") from exc
 
 
 def _hglobal_stream(pythoncom, wav_path: Path):
@@ -265,4 +292,6 @@ def self_test() -> str:
         size = stream.Stat()[2]
         assert size % SECTOR_AUDIO == 0, size
         out.append(f"Stream de audio OK: {size} bytes")
+    client.Dispatch("IMAPI2.MsftDiscFormat2Erase")
+    out.append("Borrado de CD-RW disponible")
     return "\n".join(out)

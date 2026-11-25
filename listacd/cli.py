@@ -66,6 +66,20 @@ def selftest(out: str) -> int:
 
             return f"pywebview {webview.__version__ if hasattr(webview, '__version__') else ''} + WebView2"
         check("pywebview", webview_check)
+    def disc_reader_test():
+        import struct
+
+        from .disc_reader import read_disc
+
+        with tempfile.TemporaryDirectory() as d:
+            body = struct.pack("<HHIII", 1, 1, 0, 0, 200 * 75) + b"\0" * 8
+            (Path(d) / "Track01.cda").write_bytes(b"RIFF" + struct.pack("<I", 36) + b"CDDA" + b"fmt "
+                                                  + struct.pack("<I", 24) + body)
+            disc = read_disc(Path(d), lookup=False)
+            assert disc.kind == "audio" and len(disc.tracks) == 1
+            return f"{disc.kind}, {len(disc.tracks)} pista"
+
+    check("lector de CD", disc_reader_test)
     if sys.platform == "win32":
         check("IMAPI2", burner.self_test)
     Path(out).write_text("\n".join(lines) + "\n", encoding="utf-8")

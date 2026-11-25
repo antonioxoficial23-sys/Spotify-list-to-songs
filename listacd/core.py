@@ -169,6 +169,8 @@ def run_job(
                 raise Cancelled()
             on_event(Event("track", index=idx, status=status))
 
+        if t.unknown:
+            raise LookupError("Pista de un CD sin identificar: no se sabe qué canción es.")
         if mode == "audio" and t.duration_s > cd.AUDIO_CD_SECONDS:
             raise ValueError(f"Dura {cd.fmt_time(t.duration_s)} y no cabe en un CD de audio (80 min). "
                              "Quítala o usa el modo CD MP3.")

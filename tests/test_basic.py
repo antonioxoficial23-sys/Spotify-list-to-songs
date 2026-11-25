@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from listacd import cd, core, downloader, spotify
+from listacd import burner, cd, core, downloader, spotify
 from listacd.config import Settings
 from listacd.matcher import Match, score
 from listacd.spotify import Track
@@ -477,3 +477,151 @@ def test_leftover_locked_temp_folders_do_not_block(fake_env):
         (first.folder / name / "Disco 1").mkdir(parents=True)  # como si estuvieran bloqueados
     again = core.run_job(col, s, matcher=FakeMatcher(), include={1})
     assert not again.failed and again.discs[0].folder.exists()
+
+
+# ------------------------------------------------------------------ leer un CD
+
+def _write_cda(path: Path, track: int, start: int, length: int):
+    """Archivo .cda como los que muestra Windows en un CD de audio (44 bytes)."""
+    import struct
+    body = struct.pack("<HHIII", 1, track, 0x1234, start, length) + b"\0" * 8
+    path.write_bytes(b"RIFF" + struct.pack("<I", 36) + b"CDDA" + b"fmt " + struct.pack("<I", 24) + body)
+
+
+@pytest.fixture
+def config_tmp(tmp_path, monkeypatch):
+    from listacd import config
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    from listacd import history
+    monkeypatch.setattr(history, "config_dir", lambda: tmp_path)
+    return tmp_path
+
+
+def test_read_cda(tmp_path):
+    from listacd.disc_reader import read_cda
+    _write_cda(tmp_path / "Track02.cda", 2, 20000, 15000)
+    assert read_cda(tmp_path / "Track02.cda") == (2, 20000, 15000)
+    (tmp_path / "x.cda").write_bytes(b"nada")
+    with pytest.raises(ValueError):
+        read_cda(tmp_path / "x.cda")
+
+
+def test_audio_cd_recognized_from_history(tmp_path, config_tmp):
+    from listacd import disc_reader, history
+    songs = [Track(title="Uno", artists=["A"], duration_ms=200000, spotify_id="s1"),
+             Track(title="Dos", artists=["B"], duration_ms=180000, spotify_id="s2")]
+    history.record("Verano", "audio", 1, songs, [200.0, 180.0])
+    cdroot = tmp_path / "E"
+    cdroot.mkdir()
+    # Windows ve la pausa de 2 s antes de la pista siguiente dentro de la pista anterior
+    _write_cda(cdroot / "Track01.cda", 1, 0, (200 + 2) * 75)
+    _write_cda(cdroot / "Track02.cda", 2, 202 * 75, 180 * 75)
+    disc = disc_reader.read_disc(cdroot, lookup=False)
+    assert disc.kind == "audio" and disc.source == "historial" and disc.name == "Verano"
+    assert [t.title for t in disc.tracks] == ["Uno", "Dos"] and disc.tracks[0].spotify_id == "s1"
+    assert "Lo grabó ListaCD" in disc.summary
+
+
+def test_unknown_audio_cd_and_musicbrainz(tmp_path, config_tmp, monkeypatch):
+    from listacd import disc_reader
+    cdroot = tmp_path / "E"
+    cdroot.mkdir()
+    _write_cda(cdroot / "Track01.cda", 1, 0, 300 * 75)
+    _write_cda(cdroot / "Track02.cda", 2, 300 * 75, 250 * 75)
+    # Sin red: pistas sin identificar
+    disc = disc_reader.read_disc(cdroot, lookup=False)
+    assert disc.source == "sin datos" and disc.unknown == 2 and all(t.unknown for t in disc.tracks)
+    assert disc.name.startswith("CD leído el ")  # nombre propio: no comparte carpeta con otros CDs
+    # MusicBrainz (respuesta simulada): la consulta lleva la tabla de pistas correcta
+    seen = {}
+
+    class R:
+        status_code = 200
+
+        def json(self):
+            return {"releases": [{"title": "Disco X", "artist-credit": [{"name": "Grupo", "joinphrase": ""}],
+                                  "media": [{"tracks": [{"title": "Primera", "length": 300000},
+                                                        {"title": "Segunda", "length": 250000}]}]}]}
+
+    def fake_get(url, params, headers, timeout):
+        seen.update(params)
+        return R()
+    monkeypatch.setattr(disc_reader.requests, "get", fake_get)
+    disc = disc_reader.read_disc(cdroot)
+    assert seen["toc"] == f"1 2 {550 * 75 + 150} 150 {300 * 75 + 150}"
+    assert disc.source == "musicbrainz" and disc.name == "Disco X"
+    assert [(t.title, t.artists) for t in disc.tracks] == [("Primera", ["Grupo"]), ("Segunda", ["Grupo"])]
+
+
+def test_mp3_cd_reads_tags_and_names(tmp_path):
+    from listacd import disc_reader
+    cdroot = tmp_path / "E"
+    (cdroot / "sub").mkdir(parents=True)
+    a = _fake_original(tmp_path, "x", 440)  # opus de 2 s
+    mp3 = downloader.to_mp3(a, cdroot / "02 - Artista B - Canción Dos.mp3")
+    downloader.tag_mp3(mp3, Track(title="Canción Dos", artists=["Artista B", "C"]), None, 2)
+    (cdroot / "01 - Sin Etiquetas - Primera.mp3").write_bytes(mp3.read_bytes()[-2000:])  # sin ID3
+    (cdroot / "sub" / "leeme.txt").write_text("x")
+    disc = disc_reader.read_disc(cdroot, label="VIAJE")
+    assert disc.kind == "mp3" and disc.name == "VIAJE"
+    assert [(t.title, t.artists) for t in disc.tracks] == [("Primera", ["Sin Etiquetas"]),
+                                                            ("Canción Dos", ["Artista B", "C"])]
+    empty = tmp_path / "vacio"
+    empty.mkdir()
+    assert disc_reader.read_disc(empty).kind == "vacio"
+
+
+def test_merge_tracks_skips_duplicates():
+    from listacd.webapp import merge_tracks
+    base = [Track(title="Despechá", artists=[], duration_ms=1),            # leída de un CD, sin artista
+            Track(title="Bohemian Rhapsody", artists=["Queen"], duration_ms=1, spotify_id="q1"),
+            Track(title="Pista 3", artists=[], duration_ms=1, unknown=True)]
+    extra = [Track(title="DESPECHÁ", artists=["ROSALÍA"], duration_ms=1, spotify_id="r1"),
+             Track(title="Bohemian Rhapsody - Remastered", artists=["Queen"], duration_ms=1, spotify_id="q1"),
+             Track(title="Pista 3", artists=["Alguien"], duration_ms=1, spotify_id="p3"),
+             Track(title="Nueva", artists=["X"], duration_ms=1, spotify_id="n1"),
+             Track(title="Nueva", artists=["X"], duration_ms=1, spotify_id="n1")]
+    out, added = merge_tracks(base, extra)
+    assert added == 2 and [t.title for t in out[3:]] == ["Pista 3", "Nueva"]
+
+
+def test_unknown_tracks_are_never_searched(fake_env):
+    col, s, FakeMatcher = fake_env
+    col.tracks[0].unknown = True
+    res = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
+    assert [i for i, _, _ in res.failed] == [1] and "sin identificar" in res.failed[0][2]
+
+
+def test_bridge_append_and_burn_history(fake_env, monkeypatch, config_tmp):
+    import time
+    from listacd import webapp, history
+    col, s, FakeMatcher = fake_env
+    monkeypatch.setattr(webapp.Settings, "load", classmethod(lambda cls: s))
+    api = webapp.Api()
+    api._col = spotify.Collection(name="Mi CD", kind="disc", tracks=[col.tracks[0]])
+    extra = spotify.Collection(name="Otra", kind="playlist", tracks=[col.tracks[0], col.tracks[1]])
+    monkeypatch.setattr(webapp.spotify, "fetch", lambda *a, **k: extra)
+    assert api.load("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M", append=True)["ok"]
+    ev = []
+    for _ in range(100):
+        ev += api.poll()
+        if any(e["type"] == "loaded" for e in ev):
+            break
+        time.sleep(0.02)
+    loaded = next(e for e in ev if e["type"] == "loaded")["collection"]
+    assert loaded["name"] == "Mi CD" and len(loaded["tracks"]) == 2 and "1 ya estaban" in loaded["note"]
+    # Grabar (simulado) apunta el disco en el historial
+    api._col = col
+    res = core.run_job(col, s, matcher=FakeMatcher(), include={1, 2})
+    api._result = res
+    d = burner.Drive("id", "E:", "Grabadora")
+    api._drives = [d]
+    monkeypatch.setattr(burner, "burn_audio", lambda *a, **k: None)
+    assert api.burn(1, "id")
+    for _ in range(100):
+        if any(e["type"] == "burn_done" for e in api.poll()):
+            break
+        time.sleep(0.02)
+    entry = history.load()[-1]
+    assert entry["name"] == col.name and [t["title"] for t in entry["tracks"]] == ["Canción Uno", "Canción Dos"]
+    assert history.match_audio([x + 2 for x in entry["seconds"][:-1]] + entry["seconds"][-1:]) == entry

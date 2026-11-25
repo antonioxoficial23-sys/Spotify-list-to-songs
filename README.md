@@ -39,6 +39,21 @@ Todo va incluido (ffmpeg, etc.); no hay que instalar nada más.
 Los archivos quedan en `Música\ListaCD\<nombre de la lista>\CD Audio\Disco N\` (o `CD MP3`),
 por si quieres volver a grabarlos o copiarlos a un USB.
 
+### Ver qué tiene un CD y añadirle canciones
+
+1. Mete el CD en la grabadora y pulsa **Leer un CD**.
+   - **CD de MP3**: se leen las canciones de sus archivos.
+   - **CD de audio**: estos discos no guardan los nombres de las canciones. Si lo grabó ListaCD, lo
+     reconoce por su historial; si no, lo busca en MusicBrainz (base de datos libre de CDs) por la
+     duración de sus pistas. Las pistas que no se identifiquen salen como «Sin identificar».
+2. Para añadir canciones, pega otro enlace (o canciones copiadas) y pulsa **Añadir**: se suman a las
+   del CD sin repetir las que ya estaban.
+3. Prepara y graba como siempre. **En un CD-R ya grabado no se puede añadir nada** (ListaCD cierra los
+   discos para que las radios los lean), así que se graba todo junto en un **CD-R nuevo**. Si el disco es
+   un **CD-RW**, ListaCD ofrece borrarlo y grabarlo de nuevo con todo.
+
+Las pistas «Sin identificar» no se pueden volver a grabar porque no se sabe qué canciones son.
+
 ### Listas de más de 100 canciones
 
 Con el enlace de una lista, Spotify solo deja leer **las primeras 100 canciones**. Para pasarla

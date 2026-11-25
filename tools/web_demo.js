@@ -31,9 +31,17 @@
     load: async () => ({ ok: true }), start: async () => true, cancel: async () => {}, drives: async () => (state === "sin-grabadora" ? [] : [{ id: "1", name: "E: ASUS SDRW-08U9M-U" }]),
     check_disc: async () => ({ ok: true, message: "CD-R virgen en E:." }), burn: async () => true,
     cache_info: async () => ({ bytes: 812e6 }), clear_cache: async () => ({ ok: true, bytes: 0 }),
-    save_settings: async () => ({}), rename: async (n) => ({ name: n.trim(), changed: true }), paste: async () => "", open_url: async () => {}, open_folder: async () => {}, choose_folder: async () => null,
+    save_settings: async () => ({}), read_disc: async () => ({ ok: true }), rename: async (n) => ({ name: n.trim(), changed: true }), paste: async () => "", open_url: async () => {}, open_folder: async () => {}, choose_folder: async () => null,
   } };
   window.LISTACD_DEMO = async (emit, S, render) => {
+    if (state === "cd-leido") {
+      const disc = [...tracks.slice(0, 9).map((t) => ({ ...t, unknown: false })),
+        ...[10, 11, 12].map((n) => ({ title: `Pista ${n}`, artist: "", seconds: 214 + n, unknown: true }))];
+      tracks.splice(0, tracks.length, ...disc);  // el plan simulado usa estas canciones
+      emit({ type: "loaded", collection: { name: "Verano 2024", owner: "", kind: "disc", cover: "", warning: "",
+        note: "CD de audio con 12 pistas. Lo grabó ListaCD: las canciones salen de su historial. 3 pistas no se pudieron identificar: no se pueden volver a grabar, pero sí puedes añadir canciones nuevas.", tracks: disc } });
+      return;
+    }
     if (state === "ajustes") { setTimeout(() => document.getElementById("open-settings").click(), 100); return; }
     if (state === "vacia") return;
     emit({ type: "loaded", collection: { name: "Viaje a la playa 2026", owner: "Antonio", kind: "playlist", cover, warning: "", tracks } });

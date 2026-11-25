@@ -12,11 +12,37 @@ import webbrowser
 from collections import deque
 from pathlib import Path
 
-from . import __version__, burner, cd, spotify
+from . import __version__, burner, cd, disc_reader, history, spotify
 from .config import APP_NAME, Settings, cache_size, clear_cache, open_path, resource_dir
 from .core import JobResult, run_job
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+
+
+def merge_tracks(base: list[spotify.Track], extra: list[spotify.Track]) -> tuple[list[spotify.Track], int]:
+    """Añade a `base` las canciones de `extra` que no estén ya. Devuelve (lista, añadidas).
+
+    Una canción cuenta como repetida si tiene el mismo identificador de Spotify o el mismo título
+    y artista. Las leídas de un CD pueden no tener artista: entonces basta con el título.
+    """
+    from .matcher import normalize
+
+    def artist(t: spotify.Track) -> str:
+        return normalize(t.artists[0]) if t.artists else ""
+
+    ids = {t.spotify_id for t in base if t.spotify_id}
+    pairs = {(normalize(t.title), artist(t)) for t in base if not t.unknown}
+    titles_without_artist = {normalize(t.title) for t in base if not t.unknown and not t.artists}
+    out, added = list(base), 0
+    for t in extra:
+        title = normalize(t.title)
+        if (t.spotify_id and t.spotify_id in ids) or (title, artist(t)) in pairs or title in titles_without_artist:
+            continue
+        ids.add(t.spotify_id) if t.spotify_id else None
+        pairs.add((title, artist(t)))
+        out.append(t)
+        added += 1
+    return out, added
 
 
 def _disc_dict(d: cd.Disc, burned: bool = False) -> dict:
@@ -95,8 +121,17 @@ class Api:
         return {"ok": True, "bytes": cache_size()}
 
     # -------------------------------------------------------------------- lista
-    def load(self, url: str):
+    def _send_collection(self, col: spotify.Collection, warning: str = "", note: str = ""):
+        self._emit("loaded", collection={
+            "name": col.name, "owner": col.owner, "kind": col.kind, "cover": col.cover_url,
+            "warning": warning, "note": note,
+            "tracks": [{"title": t.title, "artist": t.artist, "seconds": round(t.duration_s),
+                        "unknown": t.unknown} for t in col.tracks]})
+
+    def load(self, url: str, append: bool = False):
         url = (url or "").strip()
+        if append and (not self._col or self._busy):
+            return {"ok": False, "error": "Primero carga una lista o lee un CD."}
         try:
             spotify.parse_input(url)
         except ValueError:
@@ -108,18 +143,22 @@ class Api:
             try:
                 col = spotify.fetch(url, s.client_id, s.client_secret,
                                     progress=lambda d, t: self._emit("load_progress", done=d, total=t))
-                self._col, self._result = col, None
-                self._burned.clear()
                 warn = col.warning
                 if col.truncated:
                     warn = ("Spotify solo deja leer las primeras 100 canciones con el enlace de la lista. "
                             "Para pasarla entera: en Spotify para ordenador abre la lista, pulsa en una "
                             "canción, después Ctrl+A y Ctrl+C, y vuelve aquí y pulsa Pegar.")
-                self._emit("loaded", collection={
-                    "name": col.name, "owner": col.owner, "kind": col.kind, "cover": col.cover_url,
-                    "warning": warn,
-                    "tracks": [{"title": t.title, "artist": t.artist, "seconds": round(t.duration_s)}
-                               for t in col.tracks]})
+                note = ""
+                if append and self._col:
+                    merged, added = merge_tracks(self._col.tracks, col.tracks)
+                    skipped = len(col.tracks) - added
+                    col = spotify.Collection(name=self._col.name, kind=self._col.kind, owner=self._col.owner,
+                                             cover_url=self._col.cover_url or col.cover_url, tracks=merged)
+                    note = f"Se han añadido {added} canciones" + (
+                        f" ({skipped} ya estaban)." if skipped else ".")
+                self._col, self._result = col, None
+                self._burned.clear()
+                self._send_collection(col, warn, note)
             except Exception as exc:
                 self._emit("load_error", message=f"No se pudo leer la lista: {exc}. "
                                                  "Comprueba que es pública y que tienes internet.")
@@ -187,6 +226,43 @@ class Api:
     def cancel(self):
         self._cancel.set()
 
+    # ------------------------------------------------------------- leer un CD
+    def read_disc(self, drive_id: str = ""):
+        """Lee el CD de la grabadora para ver qué música tiene."""
+        if not burner.available():
+            return {"ok": False, "error": "Leer CDs solo está disponible en Windows."}
+        if self._busy:
+            return {"ok": False, "error": "Espera a que termine lo que se está haciendo."}
+        if not self._drives:
+            self.drives()
+        drive = self._drive(drive_id) or (self._drives[0] if self._drives else None)
+        if not drive or not drive.letter:
+            return {"ok": False, "error": "No se encuentra ninguna unidad de CD. Conéctala y vuelve a probar."}
+
+        def job():
+            try:
+                disc = disc_reader.read_disc(Path(drive.letter + "\\"))
+                if disc.kind == "vacio":
+                    self._emit("load_error", message="No hay música en el disco (o no hay disco). "
+                                                     "Mete el CD y vuelve a pulsar «Leer un CD».")
+                    return
+                col = spotify.Collection(name=disc.name, kind="disc", tracks=disc.tracks)
+                note = disc.summary
+                if disc.unknown:
+                    note += (" Esas pistas no se pueden volver a grabar porque no se sabe qué canciones son; "
+                             "sí puedes añadirles canciones nuevas en otro disco.")
+                else:
+                    note += (" Para añadir canciones, pulsa «Añadir» con otra lista. Se grabará todo junto "
+                             "en un CD nuevo (o en este mismo, si es un CD-RW).")
+                self._col, self._result = col, None
+                self._burned.clear()
+                self._send_collection(col, "", note)
+            except Exception as exc:
+                self._emit("load_error", message=f"No se pudo leer el CD: {exc}")
+
+        self._thread(job)
+        return {"ok": True}
+
     # ---------------------------------------------------------------- grabar
     def drives(self):
         if not burner.available():
@@ -217,8 +293,12 @@ class Api:
         audio = self._result.mode == "audio"
         if not info.present:
             return {"ok": False, "message": info.message or "Mete un CD-R virgen en la grabadora."}
+        if not info.blank and info.rewritable:
+            return {"ok": False, "erasable": True,
+                    "message": f"El {info.kind} ya tiene música. Se puede borrar y grabar este disco en su lugar."}
         if not info.blank:
-            return {"ok": False, "message": "El disco no está vacío. Mete un CD-R virgen."}
+            return {"ok": False, "message": "El disco ya está grabado y no se puede añadir nada más "
+                                            "(si no, la radio no podría leerlo). Mete un CD-R virgen."}
         if audio and not info.writable_cd:
             return {"ok": False, "message": f"Hay un {info.kind}. Los CD de audio necesitan un CD-R."}
         if audio and info.free_seconds and disc.seconds + 2 * len(disc.items) > info.free_seconds:
@@ -228,7 +308,7 @@ class Api:
             return {"ok": False, "message": "Las canciones no caben en este disco."}
         return {"ok": True, "message": f"{info.kind} virgen en {drive}."}
 
-    def burn(self, number: int, drive_id: str):
+    def burn(self, number: int, drive_id: str, erase: bool = False):
         disc, drive = self._disc(number), self._drive(drive_id)
         if not disc or not drive or not self._claim():
             return False
@@ -241,11 +321,18 @@ class Api:
 
         def job():
             try:
+                if erase:
+                    burner.erase(drive, prog)
                 if audio:
                     burner.burn_audio(drive, [it.path for it in disc.items], prog)
                 else:
                     burner.burn_data(drive, disc.folder, name, prog)
                 self._burned.add(number)
+                col = self._col
+                if col:  # para reconocer el disco cuando se lea más adelante
+                    history.record(name, self._result.mode, number,
+                                   [col.tracks[it.index - 1] for it in disc.items],
+                                   [it.seconds for it in disc.items])
                 self._emit("burn_done", disc=number, more=number < len(self._result.discs))
             except Exception as exc:
                 hint = (" También puedes grabar el archivo «.cue» de la carpeta del disco con ImgBurn."

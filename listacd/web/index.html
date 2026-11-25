@@ -18,8 +18,12 @@
            placeholder="Pega el enlace de tu lista de Spotify o sus canciones copiadas">
     <button type="button" class="btn quiet" id="paste">Pegar</button>
     <button type="submit" class="btn primary" id="load">Cargar lista</button>
+    <button type="button" class="btn quiet" id="add" hidden title="Suma las canciones de este enlace a la lista actual">Añadir</button>
   </form>
-  <button class="btn quiet" id="open-settings">Ajustes</button>
+  <div class="top-actions">
+    <button class="btn quiet" id="read-disc" hidden>Leer un CD</button>
+    <button class="btn quiet" id="open-settings">Ajustes</button>
+  </div>
 </header>
 
 <main>
@@ -72,6 +76,7 @@
         <div>
           <h1 id="list-name">Tu lista de canciones</h1>
           <p id="list-meta">Aparecerá aquí, repartida en discos, en cuanto cargues un enlace.</p>
+          <p class="note" id="list-note" hidden></p>
           <p class="warn" id="list-warn" hidden></p>
         </div>
       </header>

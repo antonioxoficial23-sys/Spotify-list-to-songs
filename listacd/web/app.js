@@ -8,7 +8,7 @@ const S = {
   discs: [], prepared: false, burned: new Set(), busy: false, burning: false,
   selectedDisc: 1, t0: 0, done: 0, total: 0,
 };
-const STATUS_TEXT = { Buscando: "Buscando", Descargando: "Descargando", Convirtiendo: "Convirtiendo", Lista: "Lista", Error: "Falló" };
+const STATUS_TEXT = { Buscando: "Buscando", Descargando: "Descargando", Convirtiendo: "Convirtiendo", Lista: "Lista", Error: "Falló", Unknown: "Sin identificar" };
 const MODE_HINT = {
   audio: "Calidad CD, sin pasar por MP3. Suena en cualquier radio con CD. Unas 18 canciones por disco.",
   mp3: "MP3 a 320 kbps, unas 70 canciones por disco. Solo si tu radio pone «MP3» en el frontal.",
@@ -87,6 +87,9 @@ function renderTracks() {
       el("li", {}, el("span", {}, "En Spotify, abre tu lista y pulsa ", el("b", {}, "⋯"), ".")),
       el("li", {}, el("span", {}, "Elige ", el("b", {}, "Compartir"), " y después ", el("b", {}, "Copiar enlace"), ".")),
       el("li", {}, el("span", {}, "Vuelve aquí y pulsa ", el("b", {}, "Pegar"), "."))),
+      S.canBurn ? el("p", { class: "empty-note" }, el("b", {}, "¿Qué tiene un CD? "),
+        "Mételo en la grabadora y pulsa ", el("b", {}, "Leer un CD"),
+        ". Después puedes añadirle canciones con ", el("b", {}, "Añadir"), ".") : null,
       el("p", { class: "empty-note" }, el("b", {}, "¿Más de 100 canciones? "),
         "En Spotify para ordenador, abre la lista, pulsa en una canción y después ",
         el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "A"), " y ", el("kbd", {}, "Ctrl"), "+", el("kbd", {}, "C"),
@@ -111,10 +114,10 @@ function renderTracks() {
 }
 function trackRow(i) {
   const t = S.col.tracks[i - 1], on = !S.excluded.has(i);
-  const st = S.prepared && S.status[i] === "Lista" ? null : S.status[i];
-  const cls = st === "Lista" ? "ok" : st === "Error" ? "err" : st ? "work" : "";
+  const st = t.unknown ? "Unknown" : S.prepared && S.status[i] === "Lista" ? null : S.status[i];
+  const cls = st === "Lista" ? "ok" : st === "Error" ? "err" : st === "Unknown" ? "unk" : st ? "work" : "";
   const row = el("div", { class: "row-t" + (on ? "" : " off"), id: `t${i}` },
-    el("button", { class: "chk", role: "checkbox", "aria-checked": String(on), disabled: S.busy || null,
+    el("button", { class: "chk", role: "checkbox", "aria-checked": String(on), disabled: S.busy || t.unknown || null,
       "aria-label": `${on ? "Quitar" : "Poner"} ${t.title}`, onclick: () => toggle(i) }),
     el("span", { class: "num" }, String(i)),
     el("div", { class: "what" }, el("strong", {}, t.title), el("span", {}, t.artist)),
@@ -126,7 +129,7 @@ function trackRow(i) {
 function updateRow(i) { const old = $(`t${i}`); if (old) old.replaceWith(trackRow(i)); }
 
 async function toggle(i) {
-  if (S.busy) return;
+  if (S.busy || S.col.tracks[i - 1].unknown) return;
   S.excluded.has(i) ? S.excluded.delete(i) : S.excluded.add(i);
   S.prepared = false; S.burned.clear();
   await replan();
@@ -157,6 +160,8 @@ function render() {
   $("summary-text").textContent = `${S.mode === "audio" ? "CD de audio" : "CD MP3"}${S.normalize ? ", volumen igualado" : ""}`;
   $("change").disabled = S.busy;
   $("load").disabled = S.busy;
+  $("add").hidden = !S.col; $("add").disabled = S.busy;
+  $("read-disc").hidden = !S.canBurn; $("read-disc").disabled = S.busy;
   if (S.col) $("list-name").contentEditable = S.busy ? "false" : "plaintext-only";
   renderBurn();
 }
@@ -201,13 +206,25 @@ async function loadDrives() {
 }
 
 // ------------------------------------------------------------------ acciones
-async function load(ev) {
+let loadingBtn = "load";
+const BTN_TEXT = { load: "Cargar lista", add: "Añadir", "read-disc": "Leer un CD" };
+function resetLoadButtons() { for (const id of Object.keys(BTN_TEXT)) { $(id).textContent = BTN_TEXT[id]; } render(); }
+async function load(ev, append = false) {
   ev && ev.preventDefault();
   const url = $("url").value.trim();
-  if (!url || S.busy) return;
-  $("load").disabled = true; $("load").textContent = "Cargando…";
-  const r = await S.api.load(url);
-  if (!r.ok) { $("load").disabled = false; $("load").textContent = "Cargar lista"; tell("Revisa el enlace", r.error); }
+  if (S.busy) return;
+  if (!url) { $("url").focus(); return; }
+  loadingBtn = append ? "add" : "load";
+  $(loadingBtn).disabled = true; $(loadingBtn).textContent = append ? "Añadiendo…" : "Cargando…";
+  const r = await S.api.load(url, append);
+  if (!r.ok) { resetLoadButtons(); tell("Revisa el enlace", r.error); }
+}
+async function readDisc() {
+  if (S.busy) return;
+  loadingBtn = "read-disc";
+  $("read-disc").disabled = true; $("read-disc").textContent = "Leyendo el CD…";
+  const r = await S.api.read_disc($("drive").value || "");
+  if (!r.ok) { resetLoadButtons(); tell("No se puede leer el CD", r.error); }
 }
 async function prepare() {
   if (!(await S.api.start([...S.excluded]))) return;
@@ -221,13 +238,20 @@ async function burn(n) {
   if (!drive) return tell("Falta la grabadora", "Conecta la grabadora de CD y vuelve a abrir ListaCD.");
   setStatus("Comprobando el disco…");
   const chk = await S.api.check_disc(n, drive);
-  if (!chk.ok) { setStatus(chk.message, "bad"); return tell("Todavía no se puede grabar", chk.message); }
   const d = S.discs.find((x) => x.number === n);
-  const go = await ask(`Grabar disco ${n}`,
-    `${chk.message} Se grabarán ${d.items.length} canciones (${minutes(d.seconds)}). Tarda unos minutos; no cierres ListaCD mientras tanto.`,
-    `Grabar disco ${n}`);
-  if (!go) return setStatus("");
-  if (await S.api.burn(n, drive)) {
+  let erase = false;
+  if (!chk.ok && chk.erasable) {
+    erase = await ask("Borrar el CD-RW", `${chk.message} Se borrará lo que tiene y se grabarán ${d.items.length} canciones (${minutes(d.seconds)}). No se puede deshacer.`,
+      "Borrar y grabar");
+    if (!erase) return setStatus("");
+  } else if (!chk.ok) { setStatus(chk.message, "bad"); return tell("Todavía no se puede grabar", chk.message); }
+  if (!erase) {
+    const go = await ask(`Grabar disco ${n}`,
+      `${chk.message} Se grabarán ${d.items.length} canciones (${minutes(d.seconds)}). Tarda unos minutos; no cierres ListaCD mientras tanto.`,
+      `Grabar disco ${n}`);
+    if (!go) return setStatus("");
+  }
+  if (await S.api.burn(n, drive, erase)) {
     S.busy = S.burning = true; S.selectedDisc = n; S.burnFrac = 0;
     setStatus("Grabando…"); render();
   }
@@ -237,19 +261,24 @@ async function burn(n) {
 function onEvent(e) {
   switch (e.type) {
     case "loaded":
-      S.col = e.collection; S.excluded.clear(); S.status = {}; S.errors = {}; S.prepared = false; S.burned.clear();
-      $("load").disabled = false; $("load").textContent = "Cargar lista";
+      S.col = e.collection; S.status = {}; S.errors = {}; S.prepared = false; S.burned.clear();
+      // Las pistas de un CD sin identificar no se pueden volver a grabar
+      S.excluded = new Set(S.col.tracks.map((t, k) => (t.unknown ? k + 1 : 0)).filter(Boolean));
+      if (loadingBtn === "add") $("url").value = "";
+      resetLoadButtons();
       $("list-name").textContent = S.col.name;
       $("list-name").contentEditable = "plaintext-only";  // se bloquea mientras se trabaja (render)
       $("list-name").title = "Pulsa para cambiar el nombre (es el que se escribe en el disco)";
-      $("list-meta").textContent = [S.col.owner, `${S.col.tracks.length} canciones, ${longDur(S.col.tracks.reduce((a, t) => a + t.seconds, 0))}`].filter(Boolean).join(", ");
+      $("list-meta").textContent = [S.col.kind === "disc" ? "CD leído" : S.col.owner,
+        `${S.col.tracks.length} canciones, ${longDur(S.col.tracks.reduce((a, t) => a + t.seconds, 0))}`].filter(Boolean).join(", ");
+      $("list-note").hidden = !S.col.note; $("list-note").textContent = S.col.note || "";
       $("list-warn").hidden = !S.col.warning; $("list-warn").textContent = S.col.warning || "";
       $("cover").hidden = !S.col.cover; if (S.col.cover) $("cover").src = S.col.cover;
       setStatus(""); replan(); break;
     case "load_progress":
-      $("load").textContent = `Leyendo ${e.done} de ${e.total}…`; break;
+      $(loadingBtn).textContent = `Leyendo ${e.done} de ${e.total}…`; break;
     case "load_error":
-      $("load").disabled = false; $("load").textContent = "Cargar lista"; tell("No se pudo cargar", e.message); break;
+      resetLoadButtons(); tell(loadingBtn === "read-disc" ? "No se pudo leer el CD" : "No se pudo cargar", e.message); break;
     case "track":
       S.status[e.index] = e.status; if (e.text) S.errors[e.index] = e.text; updateRow(e.index); break;
     case "progress": {
@@ -308,6 +337,9 @@ async function start() {
   const info = await S.api.init();
   S.mode = info.settings.mode; S.normalize = info.settings.normalize; S.canBurn = info.canBurn;
   $("link-form").addEventListener("submit", load);
+  $("add").addEventListener("click", () => load(null, true));
+  $("read-disc").addEventListener("click", readDisc);
+  if (S.canBurn) loadDrives();
   $("paste").addEventListener("click", async () => {
     let t = await S.api.paste();
     if (!t && navigator.clipboard) { try { t = await navigator.clipboard.readText(); } catch (_) {} }

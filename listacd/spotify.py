@@ -46,6 +46,7 @@ class Track:
     isrc: str = ""
     cover_url: str = ""
     spotify_id: str = ""
+    unknown: bool = False  # pista de un CD de audio sin identificar: no se sabe qué canción es
 
     @property
     def artist(self) -> str:

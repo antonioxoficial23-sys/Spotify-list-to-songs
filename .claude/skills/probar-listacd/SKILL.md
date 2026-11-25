@@ -27,3 +27,7 @@ Ejecuta en este orden y para en el primer fallo:
    de GitHub Actions; el paso «Comprobación interna» muestra el selftest del .exe.
 
 Informa solo de lo que falle, con la línea relevante del error. No pegues logs enteros.
+
+## GIF de demostración
+`node tools/grabar_demo.js docs/capturas/demo.gif` vuelve a grabar la secuencia del README
+(estado «pelicula» de `tools/web_demo.js`). Hazlo tras cambios visibles en la interfaz.

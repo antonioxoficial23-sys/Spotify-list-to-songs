@@ -5,7 +5,9 @@
 Pegas el enlace de una lista, eliges el tipo de CD y la app descarga las canciones, las prepara
 y graba los discos con tu grabadora. Si la lista no cabe en un CD, la reparte sola en varios.
 
-![ListaCD con una lista cargada y repartida en dos discos](docs/capturas/lista.png)
+![ListaCD en acción: se carga una lista, se preparan las canciones y se graba el primer disco](docs/capturas/demo.gif)
+
+<sub>Demostración con datos de ejemplo. [Descarga la última versión](https://github.com/antonioxoficial23-sys/Spotify-list-to-songs/releases/latest).</sub>
 
 ## Instalar (Windows)
 

@@ -34,6 +34,34 @@
     save_settings: async () => ({}), read_disc: async () => ({ ok: true }), rename: async (n) => ({ name: n.trim(), changed: true }), paste: async () => "", open_url: async () => {}, open_folder: async () => {}, choose_folder: async () => null,
   } };
   window.LISTACD_DEMO = async (emit, S, render) => {
+    if (state === "pelicula") {  // secuencia para el GIF de demostración (tools/grabar_demo.js)
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      await sleep(700);
+      const url = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M";
+      for (let k = 0; k <= url.length; k += 3) { document.getElementById("url").value = url.slice(0, k); await sleep(25); }
+      await sleep(400);
+      emit({ type: "loaded", collection: { name: "Viaje a la playa 2026", owner: "Antonio", kind: "playlist", cover, warning: "", note: "", tracks } });
+      await sleep(1600);
+      await window.prepare();
+      const order = tracks.map((_, k) => k + 1);
+      for (let k = 0; k < order.length; k++) {
+        const i = order[k];
+        emit({ type: "track", index: i, status: "Descargando" });
+        if (k > 0) emit({ type: "track", index: order[k - 1], status: "Lista" });
+        emit({ type: "progress", done: k, total: order.length });
+        await sleep(90);
+      }
+      emit({ type: "track", index: order[order.length - 1], status: "Lista" });
+      emit({ type: "job_done", cancelled: false, folder: "", discs: plan([]), failed: [] });
+      await sleep(1800);
+      S.busy = S.burning = true; S.selectedDisc = 1; render();
+      for (let f = 0; f <= 20; f++) {
+        emit({ type: "burn_progress", disc: 1, text: `Grabando la pista ${Math.min(17, 1 + Math.floor(f * 17 / 20))} de 17…`, frac: f / 20 });
+        await sleep(140);
+      }
+      emit({ type: "burn_done", disc: 1, more: true });
+      return;
+    }
     if (state === "cd-leido") {
       const disc = [...tracks.slice(0, 9).map((t) => ({ ...t, unknown: false })),
         ...[10, 11, 12].map((n) => ({ title: `Pista ${n}`, artist: "", seconds: 214 + n, unknown: true }))];
